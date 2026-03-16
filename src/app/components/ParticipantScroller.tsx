@@ -34,15 +34,26 @@ function MarqueeRow({
   items: UserProfile[];
   speed: "normal" | "slow";
 }) {
-  // Duplicate to create seamless loop
-  const doubled = [...items, ...items];
+  // Two separate groups each with a trailing gap (pr-4 = gap-4).
+  // This makes translateX(-50%) land exactly at the start of the second group,
+  // so the seam gap matches every other gap — perfectly seamless.
   return (
-    <div className="overflow-hidden">
+    <div
+      className="overflow-hidden"
+      style={{
+        maskImage: "linear-gradient(to right, transparent, black 10%, black 90%, transparent)",
+        WebkitMaskImage: "linear-gradient(to right, transparent, black 10%, black 90%, transparent)",
+      }}
+    >
       <div
-        className={`flex w-max gap-4 py-1 ${speed === "slow" ? "animate-marquee-slow" : "animate-marquee"}`}
+        className={`flex w-max ${speed === "slow" ? "animate-marquee-slow" : "animate-marquee"}`}
       >
-        {doubled.map((p, i) => (
-          <Avatar key={`${p.id}-${i}`} p={p} />
+        {[0, 1].map((gi) => (
+          <div key={gi} className="flex shrink-0 gap-4 pr-4">
+            {items.map((p, i) => (
+              <Avatar key={`${p.id}-${gi}-${i}`} p={p} />
+            ))}
+          </div>
         ))}
       </div>
     </div>
@@ -66,7 +77,7 @@ export default function ParticipantScroller({
     );
   }
 
-  // Static layout — total count ≤ 20
+  // Static layout — total count ≤ 10
   if (count <= SCROLL_THRESHOLD) {
     return (
       <div className="flex flex-wrap gap-3">
@@ -85,7 +96,7 @@ export default function ParticipantScroller({
     );
   }
 
-  // Marquee layout — > 20 participants, split into two rows
+  // Marquee layout — split into two rows
   const mid = Math.ceil(participants.length / 2);
   const row1 = participants.slice(0, mid);
   const row2 = participants.slice(mid);

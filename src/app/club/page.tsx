@@ -1,49 +1,18 @@
 import { notFound } from "next/navigation";
-import { fetchEvent, fetchEventParticipants, type Event, type UserProfile } from "../../../lib/api";
-import ImageGallery from "../../components/ImageGallery";
-import ParticipantScroller from "../../components/ParticipantScroller";
-import JoinCTA, { StickyJoinBar } from "../../components/JoinCTA";
-import AppRedirect from "../../components/AppRedirect";
+import { fetchClub, fetchClubMembers, type Club, type UserProfile } from "../../lib/api";
+import ImageGallery from "../components/ImageGallery";
+import ParticipantScroller from "../components/ParticipantScroller";
+import JoinCTA, { StickyJoinBar } from "../components/JoinCTA";
+import AppRedirect from "../components/AppRedirect";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function formatDateRange(from: string, to: string) {
-  const f = new Date(from);
-  const t = new Date(to);
-  const date = new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-  }).format(f);
-  const fromTime = new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(f);
-  const toTime = new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(t);
-  return `${date}, ${fromTime}–${toTime}`;
-}
-
-function formatFullDate(iso: string) {
+function formatDate(iso: string) {
   return new Intl.DateTimeFormat("en-GB", {
-    weekday: "long",
     day: "numeric",
     month: "long",
     year: "numeric",
   }).format(new Date(iso));
-}
-
-function isToday(iso: string) {
-  const d = new Date(iso);
-  const now = new Date();
-  return (
-    d.getDate() === now.getDate() &&
-    d.getMonth() === now.getMonth() &&
-    d.getFullYear() === now.getFullYear()
-  );
 }
 
 function mapSrc(lat: number, lon: number) {
@@ -53,36 +22,35 @@ function mapSrc(lat: number, lon: number) {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function ParticipantAvatars({ participants, count }: { participants: UserProfile[]; count: number }) {
+function MemberAvatars({ members, count }: { members: UserProfile[]; count: number }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-widest text-stone-400">
-          Participants
+          Members
         </h2>
         <span className="text-sm text-stone-300">
-          <span className="font-semibold text-white">{count}</span> going
+          <span className="font-semibold text-white">{count}</span> members
         </span>
       </div>
-      <ParticipantScroller participants={participants} count={count} />
+      <ParticipantScroller participants={members} count={count} />
     </section>
   );
 }
 
-function EventDetailCard({ event }: { event: Event }) {
-  const ownerName = `${event.owner.firstName} ${event.owner.lastName}`;
-  const ownerPhoto = event.owner.profilePhotos[0];
-  const isFree = !event.payment || event.payment === 0;
-  const loc = event.location;
+function ClubDetailCard({ club }: { club: Club }) {
+  const ownerName = `${club.owner.firstName} ${club.owner.lastName}`;
+  const ownerPhoto = club.owner.profilePhotos[0];
+  const loc = club.location;
 
   return (
     <section className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
       <h2 className="mb-4 text-xs font-semibold uppercase tracking-widest text-stone-400">
-        Event details
+        Club details
       </h2>
 
       <ul className="space-y-4">
-        {/* Organizer */}
+        {/* Owner */}
         <li className="flex items-center gap-3">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center text-stone-400">
             <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth={1.5}>
@@ -90,34 +58,16 @@ function EventDetailCard({ event }: { event: Event }) {
             </svg>
           </span>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-white truncate">{ownerName}</p>
-            <p className="text-xs text-stone-400">Host of the event</p>
+            <p className="truncate text-sm font-medium text-white">{ownerName}</p>
+            <p className="text-xs text-stone-400">Club organizer</p>
           </div>
           {ownerPhoto && (
             <img
               src={ownerPhoto}
               alt={ownerName}
-              className="h-9 w-9 shrink-0 rounded-full object-cover border border-white/10"
+              className="h-9 w-9 shrink-0 rounded-full border border-white/10 object-cover"
             />
           )}
-        </li>
-
-        {/* Date & time */}
-        <li className="flex items-start gap-3">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center text-stone-400">
-            <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
-            </svg>
-          </span>
-          <div>
-            <p className="text-sm font-medium text-white">
-              {formatDateRange(event.fromDate, event.toDate)}
-            </p>
-            <p className="text-xs text-stone-400">
-              {isToday(event.fromDate) ? "Today · " : ""}
-              {formatFullDate(event.fromDate)}
-            </p>
-          </div>
         </li>
 
         {/* Location */}
@@ -132,9 +82,9 @@ function EventDetailCard({ event }: { event: Event }) {
             <p className="text-sm font-medium text-white">
               {loc.city}, {loc.country}
             </p>
-            <p className="text-xs text-stone-400">
-              {loc.name ?? loc.address ?? "Exact location available after joining"}
-            </p>
+            {loc.address && (
+              <p className="text-xs text-stone-400">{loc.address}</p>
+            )}
           </div>
         </li>
 
@@ -147,14 +97,14 @@ function EventDetailCard({ event }: { event: Event }) {
           </span>
           <div className="flex items-center gap-2">
             <span
-              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${event.accessibility === "PUBLIC"
-                ? "bg-emerald-500/20 text-emerald-300"
-                : "bg-amber-500/20 text-amber-300"
+              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${club.accessibility === "PUBLIC"
+                  ? "bg-emerald-500/20 text-emerald-300"
+                  : "bg-amber-500/20 text-amber-300"
                 }`}
             >
-              {event.accessibility === "PUBLIC" ? "Public" : "Private"}
+              {club.accessibility === "PUBLIC" ? "Public" : "Private"}
             </span>
-            {event.askToJoin && (
+            {club.askToJoin && (
               <span className="inline-flex items-center rounded-full bg-stone-700/60 px-2.5 py-0.5 text-xs font-medium text-stone-300">
                 Ask to join
               </span>
@@ -162,24 +112,20 @@ function EventDetailCard({ event }: { event: Event }) {
           </div>
         </li>
 
-        {/* Price */}
-        <li className="flex items-center gap-3">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center text-stone-400">
-            <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0h.008v.008H18V10.5Zm-12 0h.008v.008H6V10.5Z" />
-            </svg>
-          </span>
-          {isFree ? (
-            <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-xs font-medium text-emerald-300">
-              Free
+        {/* Created */}
+        {club.createdAt && (
+          <li className="flex items-center gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center text-stone-400">
+              <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              </svg>
             </span>
-          ) : (
-            <span className="text-sm font-semibold text-white">
-              {event.currency?.symbol ?? ""}
-              {event.payment}
-            </span>
-          )}
-        </li>
+            <div>
+              <p className="text-sm font-medium text-white">Founded</p>
+              <p className="text-xs text-stone-400">{formatDate(club.createdAt)}</p>
+            </div>
+          </li>
+        )}
       </ul>
     </section>
   );
@@ -187,32 +133,33 @@ function EventDetailCard({ event }: { event: Event }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default async function EventPage({
-  params,
+export default async function ClubPage({
+  searchParams,
 }: {
-  params: Promise<{ id: string }>;
+  searchParams: Promise<{ id?: string }>;
 }) {
-  const { id } = await params;
+  const { id } = await searchParams;
+  if (!id) notFound();
 
-  let event: Event;
+  let club: Club;
   try {
-    event = await fetchEvent(id);
+    club = await fetchClub(id);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "404") notFound();
-    throw err; // surface auth errors, network errors, etc.
+    throw err;
   }
 
-  const participants = await fetchEventParticipants(id, 20).catch(() => []);
+  const members = await fetchClubMembers(id, 20).catch(() => club.previewMembers ?? []);
 
-  const heroImage = event.images[0];
-  const loc = event.location;
+  const heroImage = club.images[0];
+  const loc = club.location;
   const hasMap = loc.latitude !== 0 && loc.longitude !== 0;
 
   return (
     <div className="relative min-h-screen text-white">
-      <AppRedirect type="event" id={id} />
-      {/* Blurred background from event image */}
+      <AppRedirect type="club" id={id} />
+      {/* Blurred background */}
       {heroImage && (
         <div className="fixed inset-0 -z-10 overflow-hidden">
           <img
@@ -227,12 +174,13 @@ export default async function EventPage({
       {!heroImage && <div className="fixed inset-0 -z-10 bg-stone-950" />}
 
       {/* Two-column sticky layout */}
+      <div className="mx-auto w-full max-w-screen-2xl">
       <div className="lg:grid lg:grid-cols-2">
 
         {/* Left — sticky image panel */}
         <div className="lg:sticky lg:top-0 lg:h-screen lg:overflow-hidden flex flex-col justify-center gap-3 p-6 lg:p-10">
-          {event.images.length > 0 ? (
-            <ImageGallery images={event.images} alt={event.title} />
+          {(club.images.length > 0 || club.memories.length > 0) ? (
+            <ImageGallery images={[...club.images, ...club.memories]} alt={club.title} />
           ) : (
             <div className="flex aspect-[4/3] w-full items-center justify-center rounded-2xl bg-stone-800/60">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1} className="h-16 w-16 text-stone-600">
@@ -247,18 +195,18 @@ export default async function EventPage({
 
           {/* Title */}
           <h1 className="text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl lg:text-5xl">
-            {event.title}
+            {club.title}
           </h1>
 
-          <JoinCTA type="event" id={id} count={event.participantsCount} />
+          <JoinCTA type="club" id={id} count={club.membersCount} />
 
-          <EventDetailCard event={event} />
-          <ParticipantAvatars participants={participants} count={event.participantsCount} />
+          <ClubDetailCard club={club} />
+          <MemberAvatars members={members} count={club.membersCount} />
 
           {/* Interests */}
-          {event.interests.length > 0 && (
+          {club.interests.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              {event.interests.map((interest) => (
+              {club.interests.map((interest) => (
                 <span
                   key={interest.name}
                   className="inline-flex items-center gap-1 rounded-full bg-white/8 px-3 py-1 text-xs font-medium text-stone-300"
@@ -273,10 +221,10 @@ export default async function EventPage({
           {/* About */}
           <section className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-400">
-              About this event
+              About this club
             </h2>
             <p className="whitespace-pre-line text-sm leading-relaxed text-stone-200">
-              {event.description ?? "No description provided."}
+              {club.description ?? "No description provided."}
             </p>
           </section>
 
@@ -292,7 +240,7 @@ export default async function EventPage({
             {hasMap && (
               <iframe
                 src={mapSrc(loc.latitude, loc.longitude)}
-                title="Event location"
+                title="Club location"
                 className="h-48 w-full rounded-xl border-0 opacity-90"
                 loading="lazy"
               />
@@ -300,8 +248,9 @@ export default async function EventPage({
           </section>
         </div>
       </div>
+      </div>
 
-      <StickyJoinBar type="event" id={id} count={event.participantsCount} />
+      <StickyJoinBar type="club" id={id} count={club.membersCount} />
     </div>
   );
 }
