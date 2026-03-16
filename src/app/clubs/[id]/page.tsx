@@ -3,6 +3,7 @@ import { fetchClub, fetchClubMembers, type Club, type UserProfile } from "../../
 import ImageGallery from "../../components/ImageGallery";
 import ParticipantScroller from "../../components/ParticipantScroller";
 import JoinCTA, { StickyJoinBar } from "../../components/JoinCTA";
+import AppRedirect from "../../components/AppRedirect";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -156,6 +157,7 @@ export default async function ClubPage({
 
   return (
     <div className="relative min-h-screen text-white">
+      <AppRedirect type="club" id={id} />
       {/* Blurred background */}
       {heroImage && (
         <div className="fixed inset-0 -z-10 overflow-hidden">

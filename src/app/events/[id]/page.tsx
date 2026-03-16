@@ -3,6 +3,7 @@ import { fetchEvent, fetchEventParticipants, type Event, type UserProfile } from
 import ImageGallery from "../../components/ImageGallery";
 import ParticipantScroller from "../../components/ParticipantScroller";
 import JoinCTA, { StickyJoinBar } from "../../components/JoinCTA";
+import AppRedirect from "../../components/AppRedirect";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -210,6 +211,7 @@ export default async function EventPage({
 
   return (
     <div className="relative min-h-screen text-white">
+      <AppRedirect type="event" id={id} />
       {/* Blurred background from event image */}
       {heroImage && (
         <div className="fixed inset-0 -z-10 overflow-hidden">

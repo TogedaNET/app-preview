@@ -125,16 +125,17 @@ function StoreModal({ type, onClose }: { type: "event" | "club"; onClose: () => 
 
 // ── Shared join logic hook ─────────────────────────────────────────────────
 
-function useJoin(deepLink: string) {
+function useJoin(deepLink: string, platform: Platform) {
   const [showModal, setShowModal] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function handleJoin(isMobile: boolean) {
-    if (!isMobile) {
+  function handleJoin() {
+    if (platform === "desktop" || platform === "unknown") {
       setShowModal(true);
       return;
     }
-    // Try deep link; if app opens the page goes hidden — cancel the modal timer
+    // Mobile: try deep link; if app opens the page goes hidden — cancel the store redirect
+    const storeUrl = platform === "ios" ? APP_STORE_URL : PLAY_STORE_URL;
     window.location.href = deepLink;
     const onHide = () => {
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -143,7 +144,7 @@ function useJoin(deepLink: string) {
     document.addEventListener("visibilitychange", onHide);
     timerRef.current = setTimeout(() => {
       document.removeEventListener("visibilitychange", onHide);
-      setShowModal(true);
+      window.location.href = storeUrl;
     }, 1800);
   }
 
@@ -164,8 +165,7 @@ export default function JoinCTA({ type, id, count }: Props) {
 
   const deepLink = `${DEEP_LINK_SCHEME}://${type}?id=${id}`;
   const label = type === "event" ? "Join Event" : "Join Club";
-  const isMobile = platform === "ios" || platform === "android";
-  const { showModal, setShowModal, handleJoin } = useJoin(deepLink);
+  const { showModal, setShowModal, handleJoin } = useJoin(deepLink, platform);
 
   if (platform === "unknown") return null;
 
@@ -173,7 +173,7 @@ export default function JoinCTA({ type, id, count }: Props) {
     <>
       <div className="flex flex-col gap-3">
         <button
-          onClick={() => handleJoin(isMobile)}
+          onClick={handleJoin}
           className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white py-4 text-base font-bold text-stone-900 shadow-lg transition-all active:scale-[0.98] hover:bg-stone-100"
         >
           <PlusIcon />
@@ -201,7 +201,7 @@ export function StickyJoinBar({ type, id, count }: Props) {
   const deepLink = `${DEEP_LINK_SCHEME}://${type}?id=${id}`;
   const label = type === "event" ? "Join Event" : "Join Club";
   const isMobile = platform === "ios" || platform === "android";
-  const { showModal, setShowModal, handleJoin } = useJoin(deepLink);
+  const { showModal, setShowModal, handleJoin } = useJoin(deepLink, platform);
 
   if (!isMobile) return null;
 
@@ -219,7 +219,7 @@ export function StickyJoinBar({ type, id, count }: Props) {
             <span className="text-xs text-stone-500">Open in Togeda app</span>
           </div>
           <button
-            onClick={() => handleJoin(isMobile)}
+            onClick={handleJoin}
             className="ml-auto flex shrink-0 items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-bold text-stone-900 transition-transform active:scale-95"
           >
             <PlusIcon />
