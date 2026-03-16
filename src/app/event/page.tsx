@@ -169,16 +169,9 @@ function EventDetailCard({ event }: { event: Event }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0h.008v.008H18V10.5Zm-12 0h.008v.008H6V10.5Z" />
             </svg>
           </span>
-          {isFree ? (
-            <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-xs font-medium text-emerald-300">
-              Free
-            </span>
-          ) : (
-            <span className="text-sm font-semibold text-white">
-              {event.currency?.symbol ?? ""}
-              {event.payment}
-            </span>
-          )}
+          <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-xs font-medium text-emerald-300">
+            {isFree ? "Free" : `${event.currency?.symbol ?? ""}${event.payment}`}
+          </span>
         </li>
       </ul>
     </section>
@@ -229,79 +222,79 @@ export default async function EventPage({
 
       {/* Two-column sticky layout */}
       <div className="mx-auto w-full max-w-screen-2xl">
-      <div className="lg:grid lg:grid-cols-2">
+        <div className="lg:grid lg:grid-cols-2">
 
-        {/* Left — sticky image panel */}
-        <div className="lg:sticky lg:top-0 lg:h-screen lg:overflow-hidden flex flex-col justify-center gap-3 p-6 lg:p-10">
-          {event.images.length > 0 ? (
-            <ImageGallery images={event.images} alt={event.title} />
-          ) : (
-            <div className="flex aspect-[4/3] w-full items-center justify-center rounded-2xl bg-stone-800/60">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1} className="h-16 w-16 text-stone-600">
-                <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
-              </svg>
-            </div>
-          )}
-        </div>
-
-        {/* Right — scrollable content */}
-        <div className="flex flex-col gap-5 px-6 py-8 lg:px-10 lg:py-12">
-
-          {/* Title */}
-          <h1 className="text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl lg:text-5xl">
-            {event.title}
-          </h1>
-
-          <JoinCTA type="event" id={id} count={event.participantsCount} />
-
-          <EventDetailCard event={event} />
-          <ParticipantAvatars participants={participants} count={event.participantsCount} />
-
-          {/* Interests */}
-          {event.interests.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {event.interests.map((interest) => (
-                <span
-                  key={interest.name}
-                  className="inline-flex items-center gap-1 rounded-full bg-white/8 px-3 py-1 text-xs font-medium text-stone-300"
-                >
-                  {interest.icon && <span>{interest.icon}</span>}
-                  {interest.name}
-                </span>
-              ))}
-            </div>
-          )}
-
-          {/* About */}
-          <section className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-400">
-              About this event
-            </h2>
-            <p className="whitespace-pre-line text-sm leading-relaxed text-stone-200">
-              {event.description ?? "No description provided."}
-            </p>
-          </section>
-
-          {/* Location */}
-          <section className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-400">
-              Location
-            </h2>
-            <p className="mb-1 font-semibold text-white">{loc.name}</p>
-            <p className="mb-4 text-sm text-stone-400">
-              {[loc.address, loc.city, loc.country].filter(Boolean).join(", ")}
-            </p>
-            {hasMap && (
-              <iframe
-                src={mapSrc(loc.latitude, loc.longitude)}
-                title="Event location"
-                className="h-48 w-full rounded-xl border-0 opacity-90"
-                loading="lazy"
-              />
+          {/* Left — sticky image panel */}
+          <div className="lg:sticky lg:top-0 lg:h-screen lg:overflow-hidden flex flex-col justify-center gap-3 p-6 lg:p-10">
+            {event.images.length > 0 ? (
+              <ImageGallery images={event.images} alt={event.title} />
+            ) : (
+              <div className="flex aspect-[4/3] w-full items-center justify-center rounded-2xl bg-stone-800/60">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1} className="h-16 w-16 text-stone-600">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                </svg>
+              </div>
             )}
-          </section>
+          </div>
+
+          {/* Right — scrollable content */}
+          <div className="flex flex-col gap-5 px-6 py-8 lg:px-10 lg:py-12">
+
+            {/* Title */}
+            <h1 className="text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl lg:text-5xl">
+              {event.title}
+            </h1>
+
+            <JoinCTA type="event" id={id} count={event.participantsCount} />
+
+            <EventDetailCard event={event} />
+            <ParticipantAvatars participants={participants} count={event.participantsCount} />
+
+            {/* Interests */}
+            {event.interests.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {event.interests.map((interest) => (
+                  <span
+                    key={interest.name}
+                    className="inline-flex items-center gap-1 rounded-full bg-white/8 px-3 py-1 text-xs font-medium text-stone-300"
+                  >
+                    {interest.icon && <span>{interest.icon}</span>}
+                    {interest.name}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* About */}
+            <section className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
+              <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-400">
+                About this event
+              </h2>
+              <p className="whitespace-pre-line text-sm leading-relaxed text-stone-200">
+                {event.description ?? "No description provided."}
+              </p>
+            </section>
+
+            {/* Location */}
+            <section className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
+              <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-400">
+                Location
+              </h2>
+              <p className="mb-1 font-semibold text-white">{loc.name}</p>
+              <p className="mb-4 text-sm text-stone-400">
+                {[loc.address, loc.city, loc.country].filter(Boolean).join(", ")}
+              </p>
+              {hasMap && (
+                <iframe
+                  src={mapSrc(loc.latitude, loc.longitude)}
+                  title="Event location"
+                  className="h-48 w-full rounded-xl border-0 opacity-90"
+                  loading="lazy"
+                />
+              )}
+            </section>
+          </div>
         </div>
-      </div>
       </div>
 
       <StickyJoinBar type="event" id={id} count={event.participantsCount} />

@@ -27,6 +27,15 @@ function Avatar({ p, size = 14 }: { p: UserProfile; size?: number }) {
   );
 }
 
+// Minimum avatars per group to guarantee a dense, full-looking row.
+const MIN_GROUP_SIZE = 12;
+
+function tile(items: UserProfile[]): UserProfile[] {
+  if (items.length === 0) return [];
+  const times = Math.max(2, Math.ceil(MIN_GROUP_SIZE / items.length));
+  return Array.from({ length: times }, () => items).flat();
+}
+
 function MarqueeRow({
   items,
   speed,
@@ -34,9 +43,12 @@ function MarqueeRow({
   items: UserProfile[];
   speed: "normal" | "slow";
 }) {
-  // Two separate groups each with a trailing gap (pr-4 = gap-4).
-  // This makes translateX(-50%) land exactly at the start of the second group,
-  // so the seam gap matches every other gap — perfectly seamless.
+  // Tile the items so each group always has MIN_GROUP_SIZE+ avatars.
+  // Two separate groups each with a trailing gap (pr-4 = gap-4) so that
+  // translateX(-50%) lands exactly at the start of the second group —
+  // the seam gap matches every other gap, perfectly seamless.
+  const group = tile(items);
+
   return (
     <div
       className="overflow-hidden"
@@ -50,7 +62,7 @@ function MarqueeRow({
       >
         {[0, 1].map((gi) => (
           <div key={gi} className="flex shrink-0 gap-4 pr-4">
-            {items.map((p, i) => (
+            {group.map((p, i) => (
               <Avatar key={`${p.id}-${gi}-${i}`} p={p} />
             ))}
           </div>
