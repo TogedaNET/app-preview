@@ -223,14 +223,14 @@ export default async function EventPage({
 
       {/* Two-column sticky layout */}
       <div className="mx-auto w-full max-w-screen-2xl">
-        <div className="lg:grid lg:grid-cols-2">
+        <div className="md:grid md:grid-cols-2">
 
           {/* Left — sticky image panel */}
-          <div className="lg:sticky lg:top-0 lg:h-screen lg:overflow-hidden flex flex-col justify-center gap-3 p-6 lg:p-10">
+          <div className="md:sticky md:top-0 md:h-screen md:overflow-hidden flex flex-col justify-start gap-3 p-6 md:p-10">
             {event.images.length > 0 ? (
               <ImageGallery images={event.images} alt={event.title} />
             ) : (
-              <div className="flex aspect-[4/3] w-full items-center justify-center rounded-2xl bg-stone-800/60">
+              <div className="flex aspect-[9/16] w-full items-center justify-center rounded-2xl bg-stone-800/60">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1} className="h-16 w-16 text-stone-600">
                   <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
                 </svg>
@@ -239,7 +239,7 @@ export default async function EventPage({
           </div>
 
           {/* Right — scrollable content */}
-          <div className="flex flex-col gap-5 px-6 py-8 lg:px-10 lg:py-12">
+          <div className="flex flex-col gap-5 px-6 py-8 md:px-10 md:py-12">
 
             {/* Title */}
             <h1 className="text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl lg:text-5xl">

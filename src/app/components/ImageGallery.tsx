@@ -43,7 +43,7 @@ export default function ImageGallery({ images, alt }: Props) {
         <img
           src={heroImage}
           alt={alt}
-          className="aspect-[4/3] w-full object-cover transition-transform hover:scale-[1.02]"
+          className="aspect-4/4 md:aspect-9/16 w-full max-h-[700px], object-cover object-center transition-transform hover:scale-[1.02]"
         />
       </button>
 
