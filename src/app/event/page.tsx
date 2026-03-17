@@ -53,7 +53,7 @@ function mapSrc(lat: number, lon: number) {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function ParticipantAvatars({ participants, count }: { participants: UserProfile[]; count: number }) {
+function ParticipantAvatars({ participants, count, max }: { participants: UserProfile[]; count: number; max: number }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-sm">
       <div className="mb-4 flex items-center justify-between">
@@ -61,7 +61,8 @@ function ParticipantAvatars({ participants, count }: { participants: UserProfile
           Participants
         </h2>
         <span className="text-sm text-stone-300">
-          <span className="font-semibold text-white">{count}</span> going
+          <span className="font-semibold text-white">{count}</span>
+          {max > 0 && <span className="font-semibold text-white"> / {max}</span>} going
         </span>
       </div>
       <ParticipantScroller participants={participants} count={count} />
@@ -248,7 +249,7 @@ export default async function EventPage({
             <JoinCTA type="event" id={id} count={event.participantsCount} />
 
             <EventDetailCard event={event} />
-            <ParticipantAvatars participants={participants} count={event.participantsCount} />
+            <ParticipantAvatars participants={participants} count={event.participantsCount} max={event.maximumPeople} />
 
             {/* Interests */}
             {event.interests.length > 0 && (
