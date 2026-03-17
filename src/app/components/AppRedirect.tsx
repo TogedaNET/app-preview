@@ -2,8 +2,6 @@
 
 import { useEffect } from "react";
 
-const APP_STORE_URL = "https://apps.apple.com/bg/app/togeda-friends-activities/id6737203832";
-const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=net.togeda.app";
 const DEEP_LINK_SCHEME = "togedaapp";
 
 interface AppRedirectProps {
@@ -12,9 +10,11 @@ interface AppRedirectProps {
 }
 
 /**
- * Invisible component — on mount it tries the deep link.
- * If the app is installed the page goes into background and nothing else happens.
- * If the app is NOT installed, after 1.8 s it sends the user to the correct store.
+ * Invisible component — on mount it tries the custom scheme deep link.
+ * Universal Links handle the case where the link is opened outside the browser
+ * (e.g. iMessage, WhatsApp) — the OS opens the app directly without loading this page.
+ * This component handles the in-browser case: if the app is installed it will open,
+ * if not the user stays on the preview page.
  * On desktop it does nothing.
  */
 export default function AppRedirect({ type, id }: AppRedirectProps) {
@@ -25,26 +25,8 @@ export default function AppRedirect({ type, id }: AppRedirectProps) {
 
     if (!isIOS && !isAndroid) return;
 
-    const storeUrl = isIOS ? APP_STORE_URL : PLAY_STORE_URL;
     const deepLink = `${DEEP_LINK_SCHEME}://${type}?id=${id}`;
-
     window.location.href = deepLink;
-
-    const onHide = () => {
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onHide);
-    };
-    document.addEventListener("visibilitychange", onHide);
-
-    const timer = setTimeout(() => {
-      document.removeEventListener("visibilitychange", onHide);
-      window.location.href = storeUrl;
-    }, 1800);
-
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onHide);
-    };
   }, [type, id]);
 
   return null;
