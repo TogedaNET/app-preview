@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 const APP_STORE_URL = "https://apps.apple.com/bg/app/togeda-friends-activities/id6737203832";
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=net.togeda.app";
 const DEEP_LINK_SCHEME = "togedaapp";
+const ANDROID_PACKAGE = "net.togeda.app";
 
 type Platform = "ios" | "android" | "desktop" | "unknown";
 
@@ -123,7 +124,17 @@ function StoreModal({ type, onClose }: { type: "event" | "club"; onClose: () => 
 
 // ── Shared join logic hook ─────────────────────────────────────────────────
 
-function useJoin(deepLink: string, platform: Platform) {
+function buildDeepLink(type: "event" | "club", id: string, platform: Platform): string {
+  if (platform === "android") {
+    // Intent URL works in Telegram/Instagram WebViews where custom schemes are blocked.
+    // S.browser_fallback_url lets Android handle the Play Store redirect natively.
+    const fallback = encodeURIComponent(PLAY_STORE_URL);
+    return `intent://${type}?id=${id}#Intent;scheme=${DEEP_LINK_SCHEME};package=${ANDROID_PACKAGE};S.browser_fallback_url=${fallback};end`;
+  }
+  return `${DEEP_LINK_SCHEME}://${type}?id=${id}`;
+}
+
+function useJoin(type: "event" | "club", id: string, platform: Platform) {
   const [showModal, setShowModal] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -132,8 +143,16 @@ function useJoin(deepLink: string, platform: Platform) {
       setShowModal(true);
       return;
     }
-    // Mobile: try deep link; if app opens the page goes hidden — cancel the store redirect
-    const storeUrl = platform === "ios" ? APP_STORE_URL : PLAY_STORE_URL;
+
+    const deepLink = buildDeepLink(type, id, platform);
+
+    if (platform === "android") {
+      // Intent URL handles fallback natively — no JS timer needed
+      window.location.href = deepLink;
+      return;
+    }
+
+    // iOS: try custom scheme; if app opens the page goes hidden — cancel the store redirect
     window.location.href = deepLink;
     const onHide = () => {
       if (timerRef.current) clearTimeout(timerRef.current);
@@ -142,7 +161,7 @@ function useJoin(deepLink: string, platform: Platform) {
     document.addEventListener("visibilitychange", onHide);
     timerRef.current = setTimeout(() => {
       document.removeEventListener("visibilitychange", onHide);
-      window.location.href = storeUrl;
+      window.location.href = APP_STORE_URL;
     }, 1800);
   }
 
@@ -161,9 +180,8 @@ export default function JoinCTA({ type, id, count }: Props) {
   const [platform, setPlatform] = useState<Platform>("unknown");
   useEffect(() => setPlatform(detectPlatform()), []);
 
-  const deepLink = `${DEEP_LINK_SCHEME}://${type}?id=${id}`;
   const label = type === "event" ? "Join Event" : "Join Club";
-  const { showModal, setShowModal, handleJoin } = useJoin(deepLink, platform);
+  const { showModal, setShowModal, handleJoin } = useJoin(type, id, platform);
 
   if (platform === "unknown") return null;
 
@@ -196,10 +214,9 @@ export function StickyJoinBar({ type, id, count }: Props) {
   const [platform, setPlatform] = useState<Platform>("unknown");
   useEffect(() => setPlatform(detectPlatform()), []);
 
-  const deepLink = `${DEEP_LINK_SCHEME}://${type}?id=${id}`;
   const label = type === "event" ? "Join Event" : "Join Club";
   const isMobile = platform === "ios" || platform === "android";
-  const { showModal, setShowModal, handleJoin } = useJoin(deepLink, platform);
+  const { showModal, setShowModal, handleJoin } = useJoin(type, id, platform);
 
   if (!isMobile) return null;
 

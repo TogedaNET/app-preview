@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 
 const DEEP_LINK_SCHEME = "togedaapp";
+const ANDROID_PACKAGE = "net.togeda.app";
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=net.togeda.app";
 
 interface AppRedirectProps {
@@ -11,12 +12,17 @@ interface AppRedirectProps {
 }
 
 /**
- * Invisible component — on mount it tries the custom scheme deep link.
- * Universal Links handle the case where the link is opened outside the browser
- * (e.g. iMessage, WhatsApp) — the OS opens the app directly without loading this page.
- * This component handles the in-browser case: if the app is installed it will open,
- * if not the user stays on the preview page (iOS) or gets redirected to the Play Store (Android).
- * On desktop it does nothing.
+ * Invisible component — on mount it tries to open the app via a deep link.
+ *
+ * iOS: fires the custom scheme. Universal Links (apple-app-site-association) handle
+ * links opened outside the browser at OS level, so the page is never loaded in that case.
+ *
+ * Android: uses an Android Intent URL instead of the raw custom scheme.
+ * Intent URLs work in Telegram, Instagram, and other WebViews that block custom schemes.
+ * The S.browser_fallback_url parameter lets Android handle the Play Store redirect
+ * natively — no JS timer tricks needed.
+ *
+ * Desktop: does nothing.
  */
 export default function AppRedirect({ type, id }: AppRedirectProps) {
   useEffect(() => {
@@ -24,21 +30,17 @@ export default function AppRedirect({ type, id }: AppRedirectProps) {
     const isIOS = /iPhone|iPad|iPod/i.test(ua);
     const isAndroid = /Android/i.test(ua);
 
-    if (!isIOS && !isAndroid) return;
-
-    const deepLink = `${DEEP_LINK_SCHEME}://${type}?id=${id}`;
-    window.location.href = deepLink;
+    if (isIOS) {
+      window.location.href = `${DEEP_LINK_SCHEME}://${type}?id=${id}`;
+      return;
+    }
 
     if (isAndroid) {
-      const onHide = () => {
-        clearTimeout(timer);
-        document.removeEventListener("visibilitychange", onHide);
-      };
-      document.addEventListener("visibilitychange", onHide);
-      const timer = setTimeout(() => {
-        document.removeEventListener("visibilitychange", onHide);
-        window.location.href = PLAY_STORE_URL;
-      }, 1800);
+      // intent://<path>#Intent;scheme=<scheme>;package=<pkg>;S.browser_fallback_url=<url>;end
+      // Android reconstructs: togedaapp://<type>?id=<id>
+      const fallback = encodeURIComponent(PLAY_STORE_URL);
+      const intentUrl = `intent://${type}?id=${id}#Intent;scheme=${DEEP_LINK_SCHEME};package=${ANDROID_PACKAGE};S.browser_fallback_url=${fallback};end`;
+      window.location.href = intentUrl;
     }
   }, [type, id]);
 
