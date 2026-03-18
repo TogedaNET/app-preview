@@ -127,14 +127,7 @@ export function StoreModal({ type, onClose }: { type: "event" | "club"; onClose:
 
 function buildDeepLink(type: "event" | "club", id: string, platform: Platform): string {
   if (platform === "android") {
-    // Intent URL works in Telegram/Instagram WebViews where custom schemes are blocked.
-    // S.browser_fallback_url lets Android handle the Play Store redirect natively.
-    console.log("platform is: ", platform)
-    const fallback = encodeURIComponent(PLAY_STORE_URL);
-    console.log("fallback is: ", fallback)
-    const res = `intent://${ANDROID_API_HOST}/in-app/${type}?id=${id}#Intent;scheme=https;package=${ANDROID_PACKAGE};S.browser_fallback_url=${fallback};end`;
-    console.log("intentUrl: ", fallback)
-    return res
+    return `intent://${ANDROID_API_HOST}/in-app/${type}?id=${id}#Intent;scheme=https;package=${ANDROID_PACKAGE};end`;
   }
   return `${DEEP_LINK_SCHEME}://${type}?id=${id}`;
 }
@@ -149,16 +142,10 @@ function useJoin(type: "event" | "club", id: string, platform: Platform) {
       return;
     }
 
+    // Mobile (iOS + Android): try deep link, show StoreModal if app doesn't open
     const deepLink = buildDeepLink(type, id, platform);
-
-    if (platform === "android") {
-      // Intent URL handles fallback natively — no JS timer needed
-      window.location.href = deepLink;
-      return;
-    }
-
-    // iOS: try custom scheme; if app opens the page goes hidden — cancel the store redirect
     window.location.href = deepLink;
+
     const onHide = () => {
       if (timerRef.current) clearTimeout(timerRef.current);
       document.removeEventListener("visibilitychange", onHide);
@@ -166,7 +153,7 @@ function useJoin(type: "event" | "club", id: string, platform: Platform) {
     document.addEventListener("visibilitychange", onHide);
     timerRef.current = setTimeout(() => {
       document.removeEventListener("visibilitychange", onHide);
-      window.location.href = APP_STORE_URL;
+      setShowModal(true);
     }, 1800);
   }
 
