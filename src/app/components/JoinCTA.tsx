@@ -129,8 +129,12 @@ function buildDeepLink(type: "event" | "club", id: string, platform: Platform): 
   if (platform === "android") {
     // Intent URL works in Telegram/Instagram WebViews where custom schemes are blocked.
     // S.browser_fallback_url lets Android handle the Play Store redirect natively.
+    console.log("platform is: ", platform)
     const fallback = encodeURIComponent(PLAY_STORE_URL);
-    return `intent://${ANDROID_API_HOST}/in-app/${type}?id=${id}#Intent;scheme=https;package=${ANDROID_PACKAGE};S.browser_fallback_url=${fallback};end`;
+    console.log("fallback is: ", fallback)
+    const res = `intent://${ANDROID_API_HOST}/in-app/${type}?id=${id}#Intent;scheme=https;package=${ANDROID_PACKAGE};S.browser_fallback_url=${fallback};end`;
+    console.log("intentUrl: ", fallback)
+    return res
   }
   return `${DEEP_LINK_SCHEME}://${type}?id=${id}`;
 }
