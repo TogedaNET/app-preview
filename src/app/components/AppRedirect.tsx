@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { StoreModal } from "./JoinCTA";
 
 const DEEP_LINK_SCHEME = "togedaapp";
 const ANDROID_PACKAGE = "net.togeda.app";
 const ANDROID_API_HOST = "api.togeda.net";
-const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=net.togeda.app";
 
 interface AppRedirectProps {
   type: "event" | "club";
@@ -13,19 +13,19 @@ interface AppRedirectProps {
 }
 
 /**
- * Invisible component — on mount it tries to open the app via a deep link.
+ * On mount, tries to open the app via a deep link.
  *
- * iOS: fires the custom scheme. Universal Links (apple-app-site-association) handle
- * links opened outside the browser at OS level, so the page is never loaded in that case.
+ * iOS: fires the custom scheme. Universal Links handle links opened outside the
+ * browser at OS level so the page never loads in that case.
  *
- * Android: uses an Android Intent URL instead of the raw custom scheme.
- * Intent URLs work in Telegram, Instagram, and other WebViews that block custom schemes.
- * The S.browser_fallback_url parameter lets Android handle the Play Store redirect
- * natively — no JS timer tricks needed.
+ * Android: fires the intent URL (no auto-fallback). If the app doesn't open
+ * within 1800ms, shows the StoreModal so the user can pick their store manually.
  *
  * Desktop: does nothing.
  */
 export default function AppRedirect({ type, id }: AppRedirectProps) {
+  const [showModal, setShowModal] = useState(false);
+
   useEffect(() => {
     const ua = navigator.userAgent;
     const isIOS = /iPhone|iPad|iPod/i.test(ua);
@@ -37,13 +37,24 @@ export default function AppRedirect({ type, id }: AppRedirectProps) {
     }
 
     if (isAndroid) {
-      // intent://api.togeda.net/in-app/<type>?id=<id>#Intent;scheme=https;package=<pkg>;S.browser_fallback_url=<url>;end
-      // Android reconstructs: https://api.togeda.net/in-app/<type>?id=<id>
-      const fallback = encodeURIComponent(PLAY_STORE_URL);
-      const intentUrl = `intent://${ANDROID_API_HOST}/in-app/${type}?id=${id}#Intent;scheme=https;package=${ANDROID_PACKAGE};S.browser_fallback_url=${fallback};end`;
+      // No S.browser_fallback_url — if the app isn't installed the page stays loaded.
+      // We detect this via visibilitychange + timeout and show the StoreModal instead.
+      const intentUrl = `intent://${ANDROID_API_HOST}/in-app/${type}?id=${id}#Intent;scheme=https;package=${ANDROID_PACKAGE};end`;
       window.location.href = intentUrl;
+
+      const onHide = () => {
+        clearTimeout(timer);
+        document.removeEventListener("visibilitychange", onHide);
+      };
+      document.addEventListener("visibilitychange", onHide);
+      const timer = setTimeout(() => {
+        document.removeEventListener("visibilitychange", onHide);
+        setShowModal(true);
+      }, 1800);
     }
   }, [type, id]);
 
-  return null;
+  if (!showModal) return null;
+
+  return <StoreModal type={type} onClose={() => setShowModal(false)} />;
 }

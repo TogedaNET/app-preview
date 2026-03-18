@@ -29,7 +29,7 @@ function PlusIcon() {
 
 // ── Store modal ────────────────────────────────────────────────────────────
 
-function StoreModal({ type, onClose }: { type: "event" | "club"; onClose: () => void }) {
+export function StoreModal({ type, onClose }: { type: "event" | "club"; onClose: () => void }) {
   // Close on Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
