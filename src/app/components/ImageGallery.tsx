@@ -38,12 +38,12 @@ export default function ImageGallery({ images, alt }: Props) {
       {/* Hero image */}
       <button
         onClick={() => setLightboxIndex(0)}
-        className="block w-full overflow-hidden rounded-2xl cursor-zoom-in outline-none focus:outline-none"
+        className="max-w-125 mx-auto md:max-w-none md:mx-0 block w-full overflow-hidden rounded-2xl cursor-zoom-in outline-none focus:outline-none"
       >
         <img
           src={heroImage}
           alt={alt}
-          className="aspect-4/4 md:aspect-9/16 w-full max-h-[700px], object-cover object-center transition-transform hover:scale-[1.02]"
+          className="aspect-4/5 md:aspect-9/13 w-full object-cover object-center transition-transform hover:scale-[1.02]"
         />
       </button>
 

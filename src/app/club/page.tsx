@@ -20,6 +20,11 @@ function mapSrc(lat: number, lon: number) {
   return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta},${lat - delta},${lon + delta},${lat + delta}&layer=mapnik&marker=${lat},${lon}`;
 }
 
+function mapSrcBlurred(lat: number, lon: number) {
+  const delta = 0.04;
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta},${lat - delta},${lon + delta},${lat + delta}&layer=mapnik`;
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function MemberAvatars({ members, count }: { members: UserProfile[]; count: number }) {
@@ -83,7 +88,9 @@ function ClubDetailCard({ club }: { club: Club }) {
               {loc.city}, {loc.country}
             </p>
             {loc.address && (
-              <p className="text-xs text-stone-400">{loc.address}</p>
+              <p className="text-xs text-stone-400">
+                {club.askToJoin ? "Exact location will be revealed upon joining" : loc.address}
+              </p>
             )}
           </div>
         </li>
@@ -105,7 +112,7 @@ function ClubDetailCard({ club }: { club: Club }) {
               {club.accessibility === "PUBLIC" ? "Public" : "Private"}
             </span>
             {club.askToJoin && (
-              <span className="inline-flex items-center rounded-full bg-stone-700/60 px-2.5 py-0.5 text-xs font-medium text-stone-300">
+              <span className="inline-flex items-center rounded-full bg-amber-500/20 px-2.5 py-0.5 text-xs font-medium text-amber-300">
                 Ask to join
               </span>
             )}
@@ -117,7 +124,7 @@ function ClubDetailCard({ club }: { club: Club }) {
           <li className="flex items-center gap-3">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center text-stone-400">
               <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
               </svg>
             </span>
             <div>
@@ -174,15 +181,15 @@ export default async function ClubPage({
       {!heroImage && <div className="fixed inset-0 -z-10 bg-stone-950" />}
 
       {/* Two-column sticky layout */}
-      <div className="mx-auto w-full max-w-screen-2xl">
-      <div className="lg:grid lg:grid-cols-2">
+      <div className="mx-auto w-full max-w-300">
+      <div className="md:grid md:grid-cols-2">
 
         {/* Left — sticky image panel */}
-        <div className="lg:sticky lg:top-0 lg:h-screen lg:overflow-hidden flex flex-col justify-center gap-3 p-6 lg:p-10">
+        <div className="md:sticky md:top-0 md:h-screen md:overflow-hidden flex flex-col justify-start gap-3 p-6 lg:p-10">
           {(club.images.length > 0 || club.memories.length > 0) ? (
             <ImageGallery images={[...club.images, ...club.memories]} alt={club.title} />
           ) : (
-            <div className="flex aspect-[4/3] w-full items-center justify-center rounded-2xl bg-stone-800/60">
+            <div className="flex aspect-[9/13] w-full items-center justify-center rounded-2xl bg-stone-800/60">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1} className="h-16 w-16 text-stone-600">
                 <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
               </svg>
@@ -191,7 +198,7 @@ export default async function ClubPage({
         </div>
 
         {/* Right — scrollable content */}
-        <div className="flex flex-col gap-5 px-6 py-8 lg:px-10 lg:py-12">
+        <div className="flex flex-col gap-5 px-6 pt-2 pb-28 md:py-8 md:pb-28 lg:px-10 lg:py-12 lg:pb-12">
 
           {/* Title */}
           <h1 className="text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl lg:text-5xl">
@@ -223,7 +230,7 @@ export default async function ClubPage({
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-400">
               About this club
             </h2>
-            <p className="whitespace-pre-line text-sm leading-relaxed text-stone-200">
+            <p className="whitespace-pre-line wrap-break-word text-sm leading-relaxed text-stone-200">
               {club.description ?? "No description provided."}
             </p>
           </section>
@@ -233,13 +240,17 @@ export default async function ClubPage({
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-400">
               Location
             </h2>
-            <p className="mb-1 font-semibold text-white">{loc.name}</p>
+            <p className="mb-1 font-semibold text-white">
+              {club.askToJoin ? `${loc.city}, ${loc.country}` : loc.name}
+            </p>
             <p className="mb-4 text-sm text-stone-400">
-              {[loc.address, loc.city, loc.country].filter(Boolean).join(", ")}
+              {club.askToJoin
+                ? "Exact location will be revealed upon joining"
+                : [loc.address, loc.city, loc.country].filter(Boolean).join(", ")}
             </p>
             {hasMap && (
               <iframe
-                src={mapSrc(loc.latitude, loc.longitude)}
+                src={club.askToJoin ? mapSrcBlurred(loc.latitude, loc.longitude) : mapSrc(loc.latitude, loc.longitude)}
                 title="Club location"
                 className="h-48 w-full rounded-xl border-0 opacity-90"
                 loading="lazy"

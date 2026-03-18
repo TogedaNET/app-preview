@@ -206,7 +206,7 @@ export function StickyJoinBar({ type, id, count }: Props) {
   return (
     <>
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-stone-950/95 backdrop-blur-md">
-        <div className="mx-auto flex w-full max-w-screen-2xl items-center gap-3 px-4 pb-8 pt-3">
+        <div className="mx-auto flex w-full max-w-300 items-center gap-3 px-6 pb-8 pt-3 lg:px-10">
           <div className="flex flex-col">
             {count !== undefined && count > 0 && (
               <span className="text-xs text-stone-400">

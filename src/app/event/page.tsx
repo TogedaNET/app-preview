@@ -51,6 +51,11 @@ function mapSrc(lat: number, lon: number) {
   return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta},${lat - delta},${lon + delta},${lat + delta}&layer=mapnik&marker=${lat},${lon}`;
 }
 
+function mapSrcBlurred(lat: number, lon: number) {
+  const delta = 0.04;
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta},${lat - delta},${lon + delta},${lat + delta}&layer=mapnik`;
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function ParticipantAvatars({ participants, count, max }: { participants: UserProfile[]; count: number; max: number }) {
@@ -134,7 +139,9 @@ function EventDetailCard({ event }: { event: Event }) {
               {loc.city}, {loc.country}
             </p>
             <p className="text-xs text-stone-400">
-              {loc.name ?? loc.address ?? "Exact location available after joining"}
+              {event.askToJoin
+                ? "Exact location will be revealed upon joining"
+                : (loc.name ?? loc.address ?? "Exact location available after joining")}
             </p>
           </div>
         </li>
@@ -156,7 +163,7 @@ function EventDetailCard({ event }: { event: Event }) {
               {event.accessibility === "PUBLIC" ? "Public" : "Private"}
             </span>
             {event.askToJoin && (
-              <span className="inline-flex items-center rounded-full bg-stone-700/60 px-2.5 py-0.5 text-xs font-medium text-stone-300">
+              <span className="inline-flex items-center rounded-full bg-amber-500/20 px-2.5 py-0.5 text-xs font-medium text-amber-300">
                 Ask to join
               </span>
             )}
@@ -222,15 +229,15 @@ export default async function EventPage({
       {!heroImage && <div className="fixed inset-0 -z-10 bg-stone-950" />}
 
       {/* Two-column sticky layout */}
-      <div className="mx-auto w-full max-w-screen-2xl">
+      <div className="mx-auto w-full max-w-300">
         <div className="md:grid md:grid-cols-2">
 
           {/* Left — sticky image panel */}
-          <div className="md:sticky md:top-0 md:h-screen md:overflow-hidden flex flex-col justify-start gap-3 p-6 md:p-10">
+          <div className="md:sticky md:top-0 md:h-screen md:overflow-hidden flex flex-col justify-start gap-3 p-6 lg:p-10">
             {event.images.length > 0 ? (
               <ImageGallery images={event.images} alt={event.title} />
             ) : (
-              <div className="flex aspect-[9/16] w-full items-center justify-center rounded-2xl bg-stone-800/60">
+              <div className="flex aspect-[9/13] w-full items-center justify-center rounded-2xl bg-stone-800/60">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1} className="h-16 w-16 text-stone-600">
                   <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
                 </svg>
@@ -239,7 +246,7 @@ export default async function EventPage({
           </div>
 
           {/* Right — scrollable content */}
-          <div className="flex flex-col gap-5 px-6 py-8 md:px-10 md:py-12">
+          <div className="flex flex-col gap-5 px-6 pt-2 pb-28 md:py-8 md:pb-28 lg:px-10 lg:py-12 lg:pb-12">
 
             {/* Title */}
             <h1 className="text-3xl font-bold leading-tight tracking-tight text-white sm:text-4xl lg:text-5xl">
@@ -271,7 +278,7 @@ export default async function EventPage({
               <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-400">
                 About this event
               </h2>
-              <p className="whitespace-pre-line text-sm leading-relaxed text-stone-200">
+              <p className="whitespace-pre-line wrap-break-word text-sm leading-relaxed text-stone-200">
                 {event.description ?? "No description provided."}
               </p>
             </section>
@@ -281,13 +288,17 @@ export default async function EventPage({
               <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-400">
                 Location
               </h2>
-              <p className="mb-1 font-semibold text-white">{loc.name}</p>
+              <p className="mb-1 font-semibold text-white">
+                {event.askToJoin ? `${loc.city}, ${loc.country}` : loc.name}
+              </p>
               <p className="mb-4 text-sm text-stone-400">
-                {[loc.address, loc.city, loc.country].filter(Boolean).join(", ")}
+                {event.askToJoin
+                  ? "Exact location will be revealed upon joining"
+                  : [loc.address, loc.city, loc.country].filter(Boolean).join(", ")}
               </p>
               {hasMap && (
                 <iframe
-                  src={mapSrc(loc.latitude, loc.longitude)}
+                  src={event.askToJoin ? mapSrcBlurred(loc.latitude, loc.longitude) : mapSrc(loc.latitude, loc.longitude)}
                   title="Event location"
                   className="h-48 w-full rounded-xl border-0 opacity-90"
                   loading="lazy"
