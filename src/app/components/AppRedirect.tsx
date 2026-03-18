@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 const DEEP_LINK_SCHEME = "togedaapp";
 const ANDROID_PACKAGE = "net.togeda.app";
+const ANDROID_API_HOST = "api.togeda.net";
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=net.togeda.app";
 
 interface AppRedirectProps {
@@ -36,10 +37,10 @@ export default function AppRedirect({ type, id }: AppRedirectProps) {
     }
 
     if (isAndroid) {
-      // intent://<path>#Intent;scheme=<scheme>;package=<pkg>;S.browser_fallback_url=<url>;end
-      // Android reconstructs: togedaapp://<type>?id=<id>
+      // intent://api.togeda.net/in-app/<type>?id=<id>#Intent;scheme=https;package=<pkg>;S.browser_fallback_url=<url>;end
+      // Android reconstructs: https://api.togeda.net/in-app/<type>?id=<id>
       const fallback = encodeURIComponent(PLAY_STORE_URL);
-      const intentUrl = `intent://${type}?id=${id}#Intent;scheme=${DEEP_LINK_SCHEME};package=${ANDROID_PACKAGE};S.browser_fallback_url=${fallback};end`;
+      const intentUrl = `intent://${ANDROID_API_HOST}/in-app/${type}?id=${id}#Intent;scheme=https;package=${ANDROID_PACKAGE};S.browser_fallback_url=${fallback};end`;
       window.location.href = intentUrl;
     }
   }, [type, id]);

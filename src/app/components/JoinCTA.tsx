@@ -7,6 +7,7 @@ const APP_STORE_URL = "https://apps.apple.com/bg/app/togeda-friends-activities/i
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=net.togeda.app";
 const DEEP_LINK_SCHEME = "togedaapp";
 const ANDROID_PACKAGE = "net.togeda.app";
+const ANDROID_API_HOST = "api.togeda.net";
 
 type Platform = "ios" | "android" | "desktop" | "unknown";
 
@@ -129,7 +130,7 @@ function buildDeepLink(type: "event" | "club", id: string, platform: Platform): 
     // Intent URL works in Telegram/Instagram WebViews where custom schemes are blocked.
     // S.browser_fallback_url lets Android handle the Play Store redirect natively.
     const fallback = encodeURIComponent(PLAY_STORE_URL);
-    return `intent://${type}?id=${id}#Intent;scheme=${DEEP_LINK_SCHEME};package=${ANDROID_PACKAGE};S.browser_fallback_url=${fallback};end`;
+    return `intent://${ANDROID_API_HOST}/in-app/${type}?id=${id}#Intent;scheme=https;package=${ANDROID_PACKAGE};S.browser_fallback_url=${fallback};end`;
   }
   return `${DEEP_LINK_SCHEME}://${type}?id=${id}`;
 }
