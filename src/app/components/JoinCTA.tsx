@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import AuthModal from "./AuthModal";
+import type { Interest, Location } from "~/lib/api";
 
 const APP_STORE_URL = "https://apps.apple.com/bg/app/togeda-friends-activities/id6737203832";
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=net.togeda.app";
@@ -134,11 +136,13 @@ function buildDeepLink(type: "event" | "club", id: string, platform: Platform): 
 
 function useJoin(type: "event" | "club", id: string, platform: Platform) {
   const [showModal, setShowModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authInitialScreen, setAuthInitialScreen] = useState<"welcome" | "googleProfile">("welcome");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function handleJoin() {
     if (platform === "desktop" || platform === "unknown") {
-      setShowModal(true);
+      setShowAuthModal(true);
       return;
     }
 
@@ -157,7 +161,7 @@ function useJoin(type: "event" | "club", id: string, platform: Platform) {
     }, 1800);
   }
 
-  return { showModal, setShowModal, handleJoin };
+  return { showModal, setShowModal, showAuthModal, setShowAuthModal, authInitialScreen, setAuthInitialScreen, handleJoin };
 }
 
 // ── JoinCTA (inline, right column) ────────────────────────────────────────
@@ -166,14 +170,35 @@ interface Props {
   type: "event" | "club";
   id: string;
   count?: number;
+  interests?: Interest[];
+  location?: Location;
 }
 
-export default function JoinCTA({ type, id, count }: Props) {
+export default function JoinCTA({ type, id, count, interests, location }: Props) {
   const [platform, setPlatform] = useState<Platform>("unknown");
   useEffect(() => setPlatform(detectPlatform()), []);
 
   const label = type === "event" ? "Join Event" : "Join Club";
-  const { showModal, setShowModal, handleJoin } = useJoin(type, id, platform);
+  const { showModal, setShowModal, showAuthModal, setShowAuthModal, authInitialScreen, setAuthInitialScreen, handleJoin } = useJoin(type, id, platform);
+
+  useEffect(() => {
+    const flag = localStorage.getItem("togeda_google_auth_complete");
+    if (flag) {
+      localStorage.removeItem("togeda_google_auth_complete");
+      setShowAuthModal(true);
+      setAuthInitialScreen("googleProfile");
+    }
+  }, [setShowAuthModal, setAuthInitialScreen]);
+
+  const defaultLocation: Location = location ?? {
+    name: "",
+    address: "",
+    city: "",
+    state: "",
+    country: "",
+    latitude: 0,
+    longitude: 0,
+  };
 
   if (platform === "unknown") return null;
 
@@ -196,19 +221,48 @@ export default function JoinCTA({ type, id, count }: Props) {
       </div>
 
       {showModal && <StoreModal type={type} onClose={() => setShowModal(false)} />}
+      {showAuthModal && (
+        <AuthModal
+          type={type}
+          id={id}
+          interests={interests ?? []}
+          location={defaultLocation}
+          onClose={() => setShowAuthModal(false)}
+          initialScreen={authInitialScreen}
+        />
+      )}
     </>
   );
 }
 
 // ── StickyJoinBar (fixed bottom, mobile only) ─────────────────────────────
 
-export function StickyJoinBar({ type, id, count }: Props) {
+export function StickyJoinBar({ type, id, count, interests, location }: Props) {
   const [platform, setPlatform] = useState<Platform>("unknown");
   useEffect(() => setPlatform(detectPlatform()), []);
 
   const label = type === "event" ? "Join Event" : "Join Club";
   const isMobile = platform === "ios" || platform === "android";
-  const { showModal, setShowModal, handleJoin } = useJoin(type, id, platform);
+  const { showModal, setShowModal, showAuthModal, setShowAuthModal, authInitialScreen, setAuthInitialScreen, handleJoin } = useJoin(type, id, platform);
+
+  useEffect(() => {
+    const flag = localStorage.getItem("togeda_google_auth_complete");
+    if (flag) {
+      localStorage.removeItem("togeda_google_auth_complete");
+      setShowAuthModal(true);
+      setAuthInitialScreen("googleProfile");
+    }
+  }, [setShowAuthModal, setAuthInitialScreen]);
+
+  const defaultLocation: Location = location ?? {
+    name: "",
+    address: "",
+    city: "",
+    state: "",
+    country: "",
+    latitude: 0,
+    longitude: 0,
+  };
 
   if (!isMobile) return null;
 
@@ -236,6 +290,16 @@ export function StickyJoinBar({ type, id, count }: Props) {
       </div>
 
       {showModal && <StoreModal type={type} onClose={() => setShowModal(false)} />}
+      {showAuthModal && (
+        <AuthModal
+          type={type}
+          id={id}
+          interests={interests ?? []}
+          location={defaultLocation}
+          onClose={() => setShowAuthModal(false)}
+          initialScreen={authInitialScreen}
+        />
+      )}
     </>
   );
 }

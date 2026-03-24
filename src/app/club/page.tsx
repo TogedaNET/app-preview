@@ -205,7 +205,7 @@ export default async function ClubPage({
             {club.title}
           </h1>
 
-          <JoinCTA type="club" id={id} count={club.membersCount} />
+          <JoinCTA type="club" id={id} count={club.membersCount} interests={club.interests} location={club.location} />
 
           <ClubDetailCard club={club} />
           <MemberAvatars members={members} count={club.membersCount} />
@@ -261,7 +261,7 @@ export default async function ClubPage({
       </div>
       </div>
 
-      <StickyJoinBar type="club" id={id} count={club.membersCount} />
+      <StickyJoinBar type="club" id={id} count={club.membersCount} interests={club.interests} location={club.location} />
     </div>
   );
 }

@@ -253,7 +253,7 @@ export default async function EventPage({
               {event.title}
             </h1>
 
-            <JoinCTA type="event" id={id} count={event.participantsCount} />
+            <JoinCTA type="event" id={id} count={event.participantsCount} interests={event.interests} location={event.location} />
 
             <EventDetailCard event={event} />
             <ParticipantAvatars participants={participants} count={event.participantsCount} max={event.maximumPeople} />
@@ -309,7 +309,7 @@ export default async function EventPage({
         </div>
       </div>
 
-      <StickyJoinBar type="event" id={id} count={event.participantsCount} />
+      <StickyJoinBar type="event" id={id} count={event.participantsCount} interests={event.interests} location={event.location} />
     </div>
   );
 }
