@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import AuthModal from "./AuthModal";
+import { useAuth } from "./AuthContext";
 import type { Interest, Location } from "~/lib/api";
 
 const APP_STORE_URL = "https://apps.apple.com/bg/app/togeda-friends-activities/id6737203832";
@@ -134,15 +135,42 @@ function buildDeepLink(type: "event" | "club", id: string, platform: Platform): 
   return `${DEEP_LINK_SCHEME}://${type}?id=${id}`;
 }
 
+type JoinResult = "joined" | "requested" | "already" | "ended" | "error" | null;
+
 function useJoin(type: "event" | "club", id: string, platform: Platform) {
+  const { isAuthenticated, token } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authInitialScreen, setAuthInitialScreen] = useState<"welcome" | "googleProfile">("welcome");
+  const [joinResult, setJoinResult] = useState<JoinResult>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  function handleJoin() {
+  async function handleJoin() {
     if (platform === "desktop" || platform === "unknown") {
-      setShowAuthModal(true);
+      if (isAuthenticated && token) {
+        // Already logged in — join directly
+        try {
+          const res = await fetch("/api/join", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ type, id }),
+          });
+          const data = (await res.json()) as { success?: boolean; error?: string };
+          if (data.success) {
+            setJoinResult("joined");
+          } else {
+            const msg = (data.error ?? "").toLowerCase();
+            if (msg.includes("already")) setJoinResult("already");
+            else if (msg.includes("request")) setJoinResult("requested");
+            else if (["started", "ended", "past", "expired"].some((k) => msg.includes(k))) setJoinResult("ended");
+            else setJoinResult("error");
+          }
+        } catch {
+          setJoinResult("error");
+        }
+      } else {
+        setShowAuthModal(true);
+      }
       return;
     }
 
@@ -161,7 +189,7 @@ function useJoin(type: "event" | "club", id: string, platform: Platform) {
     }, 1800);
   }
 
-  return { showModal, setShowModal, showAuthModal, setShowAuthModal, authInitialScreen, setAuthInitialScreen, handleJoin };
+  return { showModal, setShowModal, showAuthModal, setShowAuthModal, authInitialScreen, setAuthInitialScreen, joinResult, setJoinResult, handleJoin };
 }
 
 // ── JoinCTA (inline, right column) ────────────────────────────────────────
@@ -174,12 +202,20 @@ interface Props {
   location?: Location;
 }
 
+function joinResultMessage(result: JoinResult, type: "event" | "club"): string {
+  if (result === "joined") return type === "event" ? "You're going! 🎉" : "You joined the club! 🎉";
+  if (result === "requested") return "Request sent! You'll be notified when approved.";
+  if (result === "already") return type === "event" ? "You're already going to this event." : "You're already a member.";
+  if (result === "ended") return "This event has already ended.";
+  return "Something went wrong. Please try again.";
+}
+
 export default function JoinCTA({ type, id, count, interests, location }: Props) {
   const [platform, setPlatform] = useState<Platform>("unknown");
   useEffect(() => setPlatform(detectPlatform()), []);
 
   const label = type === "event" ? "Join Event" : "Join Club";
-  const { showModal, setShowModal, showAuthModal, setShowAuthModal, authInitialScreen, setAuthInitialScreen, handleJoin } = useJoin(type, id, platform);
+  const { showModal, setShowModal, showAuthModal, setShowAuthModal, authInitialScreen, setAuthInitialScreen, joinResult, setJoinResult, handleJoin } = useJoin(type, id, platform);
 
   useEffect(() => {
     const flag = localStorage.getItem("togeda_google_auth_complete");
@@ -212,6 +248,12 @@ export default function JoinCTA({ type, id, count, interests, location }: Props)
           <PlusIcon />
           {label}
         </button>
+        {joinResult && (
+          <div className={`rounded-xl px-4 py-3 text-sm text-center font-medium ${joinResult === "error" ? "bg-red-500/15 text-red-300" : "bg-white/10 text-white"}`}>
+            {joinResultMessage(joinResult, type)}
+            <button onClick={() => setJoinResult(null)} className="ml-2 text-xs opacity-60 hover:opacity-100">✕</button>
+          </div>
+        )}
         {count !== undefined && count > 1 && (
           <p className="text-center text-sm text-stone-400">
             Join <span className="font-semibold text-white">{count.toLocaleString()}</span>{" "}
@@ -235,7 +277,7 @@ export default function JoinCTA({ type, id, count, interests, location }: Props)
   );
 }
 
-// ── StickyJoinBar (fixed bottom, mobile only) ─────────────────────────────
+// ── StickyJoinBar (fixed bottom, mobile only) ────────────────────────────
 
 export function StickyJoinBar({ type, id, count, interests, location }: Props) {
   const [platform, setPlatform] = useState<Platform>("unknown");
@@ -243,7 +285,7 @@ export function StickyJoinBar({ type, id, count, interests, location }: Props) {
 
   const label = type === "event" ? "Join Event" : "Join Club";
   const isMobile = platform === "ios" || platform === "android";
-  const { showModal, setShowModal, showAuthModal, setShowAuthModal, authInitialScreen, setAuthInitialScreen, handleJoin } = useJoin(type, id, platform);
+  const { showModal, setShowModal, showAuthModal, setShowAuthModal, authInitialScreen, setAuthInitialScreen, joinResult, setJoinResult, handleJoin } = useJoin(type, id, platform);
 
   useEffect(() => {
     const flag = localStorage.getItem("togeda_google_auth_complete");
@@ -287,6 +329,14 @@ export function StickyJoinBar({ type, id, count, interests, location }: Props) {
             {label}
           </button>
         </div>
+        {joinResult && (
+          <div
+            className="border-t border-white/10 px-6 py-2 text-xs text-center text-stone-300 cursor-pointer"
+            onClick={() => setJoinResult(null)}
+          >
+            {joinResultMessage(joinResult, type)}
+          </div>
+        )}
       </div>
 
       {showModal && <StoreModal type={type} onClose={() => setShowModal(false)} />}

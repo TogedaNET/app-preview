@@ -3,6 +3,7 @@ import "~/styles/globals.css";
 import { type Metadata } from "next";
 import { Geist } from "next/font/google";
 import { AuthProvider } from "./components/AuthContext";
+import UserBadge from "./components/UserBadge";
 
 export const metadata: Metadata = {
   title: "Togeda App Preview",
@@ -20,7 +21,10 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${geist.variable}`}>
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <UserBadge />
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

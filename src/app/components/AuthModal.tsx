@@ -40,10 +40,10 @@ type Screen =
   | "error";
 
 interface Props {
-  type: "event" | "club";
-  id: string;
-  interests: Interest[];
-  location: Location;
+  type?: "event" | "club";
+  id?: string;
+  interests?: Interest[];
+  location?: Location;
   onClose: () => void;
   initialScreen?: Screen;
 }
@@ -208,8 +208,9 @@ export default function AuthModal({
   onClose,
   initialScreen,
 }: Props) {
-  const { setToken } = useAuth();
+  const { setToken, setDisplayName } = useAuth();
   const noun = type === "event" ? "event" : "club";
+  const hasJoinContext = !!type && !!id;
 
   const [screen, setScreen] = useState<Screen>(initialScreen ?? "welcome");
   const [error, setError] = useState("");
@@ -263,7 +264,7 @@ export default function AuthModal({
     gender: "",
   });
 
-  const [successType, setSuccessType] = useState<"joined" | "requested" | "already">("joined");
+  const [successType, setSuccessType] = useState<"joined" | "requested" | "already" | "ended">("joined");
 
   // Close on Escape
   useEffect(() => {
@@ -274,9 +275,22 @@ export default function AuthModal({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
+  // Trigger Google profile check when that screen becomes active
+  useEffect(() => {
+    if (screen === "googleProfile") {
+      void checkGoogleUserProfile();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
+
   // ── Join action ──────────────────────────────────────────────────────────────
 
   async function performJoin(token: string) {
+    if (!hasJoinContext) {
+      setSuccessType("joined");
+      setScreen("success");
+      return;
+    }
     setScreen("joining");
     try {
       const res = await fetch("/api/join", {
@@ -295,8 +309,14 @@ export default function AuthModal({
         setScreen("success");
       } else {
         const d = (await res.json()) as { error?: string };
-        setError(d.error ?? "Failed to join");
-        setScreen("error");
+        const msg = (d.error ?? "").toLowerCase();
+        if (msg.includes("started") || msg.includes("ended") || msg.includes("past") || msg.includes("expired")) {
+          setSuccessType("ended");
+          setScreen("success");
+        } else {
+          setError(d.error ?? "Failed to join");
+          setScreen("error");
+        }
       }
     } catch {
       setError("Network error. Please try again.");
@@ -311,15 +331,14 @@ export default function AuthModal({
     const returnTo = window.location.pathname + window.location.search;
     localStorage.setItem("togeda_return_to", returnTo);
     localStorage.setItem("togeda_pending_join", JSON.stringify({ type, id }));
-    const url = new URL(
-      "https://togeda-main.auth.eu-central-1.amazoncognito.com/oauth2/authorize"
-    );
-    url.searchParams.set("client_id", "1056r625pmmd5cieos665rceii");
-    url.searchParams.set("response_type", "token");
-    url.searchParams.set("scope", "aws.cognito.signin.user.admin email openid phone");
-    url.searchParams.set("identity_provider", "Google");
-    url.searchParams.set("redirect_uri", callbackUrl);
-    window.location.href = url.toString();
+    // Use URLSearchParams.toString() which encodes spaces as + (required by Cognito)
+    const params = new URLSearchParams({
+      client_id: "1056r625pmmd5cieos665rceii",
+      response_type: "token",
+      scope: "aws.cognito.signin.user.admin email openid phone",
+      redirect_uri: callbackUrl,
+    });
+    window.location.href = `https://togeda-main.auth.eu-central-1.amazoncognito.com/login?${params.toString()}`;
   }
 
   // ── Check Google user profile ─────────────────────────────────────────────
@@ -335,6 +354,8 @@ export default function AuthModal({
       headers: { Authorization: `Bearer ${token}` },
     });
     if (res.ok) {
+      const profile = (await res.json()) as { firstName?: string };
+      if (profile.firstName) localStorage.setItem("togeda_display_name", profile.firstName);
       setToken(token);
       await performJoin(token);
     } else if (res.status === 404) {
@@ -371,6 +392,13 @@ export default function AuthModal({
         return;
       }
       setToken(data.token!);
+      // Fetch profile in background to get display name
+      void fetch("/api/auth/me", { headers: { Authorization: `Bearer ${data.token!}` } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((p: { firstName?: string } | null) => {
+          if (p?.firstName) setDisplayName(p.firstName);
+        })
+        .catch(() => undefined);
       await performJoin(data.token!);
     } catch {
       setError("Network error. Please try again.");
@@ -469,9 +497,13 @@ export default function AuthModal({
     try {
       const geo = await getUserLocation();
       const loc: Location = {
-        ...location,
-        latitude: geo?.lat ?? location.latitude,
-        longitude: geo?.lon ?? location.longitude,
+        name: location?.name ?? "",
+        address: location?.address ?? "",
+        city: location?.city ?? "",
+        state: location?.state ?? "",
+        country: location?.country ?? "",
+        latitude: geo?.lat ?? location?.latitude ?? 0,
+        longitude: geo?.lon ?? location?.longitude ?? 0,
       };
 
       const d = parseInt(regForm.day, 10);
@@ -504,6 +536,7 @@ export default function AuthModal({
         setLoading(false);
         return;
       }
+      localStorage.setItem("togeda_display_name", regForm.firstName.trim());
       setToken(data.token!);
       await performJoin(data.token!);
     } catch {
@@ -576,9 +609,13 @@ export default function AuthModal({
 
       const geo = await getUserLocation();
       const loc: Location = {
-        ...location,
-        latitude: geo?.lat ?? location.latitude,
-        longitude: geo?.lon ?? location.longitude,
+        name: location?.name ?? "",
+        address: location?.address ?? "",
+        city: location?.city ?? "",
+        state: location?.state ?? "",
+        country: location?.country ?? "",
+        latitude: geo?.lat ?? location?.latitude ?? 0,
+        longitude: geo?.lon ?? location?.longitude ?? 0,
       };
 
       const d = parseInt(profileForm.day, 10);
@@ -611,6 +648,7 @@ export default function AuthModal({
         return;
       }
 
+      localStorage.setItem("togeda_display_name", profileForm.firstName.trim());
       setToken(token);
       await performJoin(token);
     } catch {
@@ -649,7 +687,7 @@ export default function AuthModal({
         <div className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src="/togeda-logo.png" alt="Togeda" className="h-10 w-10 rounded-2xl" />
-            <h2 className="text-lg font-bold text-white">Join this {noun}</h2>
+            <h2 className="text-lg font-bold text-white">{hasJoinContext ? `Join this ${noun}` : "Welcome to Togeda"}</h2>
           </div>
           <button
             onClick={onClose}
@@ -956,8 +994,6 @@ export default function AuthModal({
               <option value="" disabled>Select gender</option>
               <option value="MALE">Male</option>
               <option value="FEMALE">Female</option>
-              <option value="OTHER">Other</option>
-              <option value="PREFER_NOT_TO_SAY">Prefer not to say</option>
             </select>
             {regErrors.gender && <p className={errorCls}>{regErrors.gender}</p>}
           </div>
@@ -1030,10 +1066,6 @@ export default function AuthModal({
   }
 
   function GoogleProfileScreen() {
-    useEffect(() => {
-      void checkGoogleUserProfile();
-    }, []);
-
     if (loading) {
       return (
         <div className="flex flex-col items-center justify-center gap-4 p-10">
@@ -1132,8 +1164,6 @@ export default function AuthModal({
               <option value="" disabled>Select gender</option>
               <option value="MALE">Male</option>
               <option value="FEMALE">Female</option>
-              <option value="OTHER">Other</option>
-              <option value="PREFER_NOT_TO_SAY">Prefer not to say</option>
             </select>
             {profileErrors.gender && <p className={errorCls}>{profileErrors.gender}</p>}
           </div>
@@ -1163,12 +1193,17 @@ export default function AuthModal({
   }
 
   function SuccessScreen() {
-    const headline = successType === "requested" ? "Request sent!" : "You're in!";
+    const headline =
+      successType === "requested" ? "Request sent!" :
+      successType === "ended" ? "You're signed in!" :
+      "You're in!";
     let subtext: string;
     if (successType === "joined") {
       subtext = `You've successfully joined this ${noun}.`;
     } else if (successType === "requested") {
       subtext = "Your join request has been sent. The host will review it.";
+    } else if (successType === "ended") {
+      subtext = `This ${noun} has already taken place, but your account is ready. Look out for upcoming events!`;
     } else {
       subtext = `You're already a member of this ${noun}.`;
     }
