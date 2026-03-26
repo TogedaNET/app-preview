@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import AuthModal from "./AuthModal";
+import PaymentModal from "./PaymentModal";
 import { useAuth } from "./AuthContext";
-import type { Interest, Location } from "~/lib/api";
+import type { Currency, Interest, Location } from "~/lib/api";
 
 const APP_STORE_URL = "https://apps.apple.com/bg/app/togeda-friends-activities/id6737203832";
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=net.togeda.app";
@@ -137,36 +138,90 @@ function buildDeepLink(type: "event" | "club", id: string, platform: Platform): 
 
 type JoinResult = "joined" | "requested" | "already" | "ended" | "error" | null;
 
-function useJoin(type: "event" | "club", id: string, platform: Platform) {
+const JOINED_EVENTS_KEY = "togeda_joined_events";
+
+function getJoinedEvents(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(JOINED_EVENTS_KEY) ?? "[]") as string[];
+  } catch {
+    return [];
+  }
+}
+
+function markEventJoined(id: string) {
+  const joined = getJoinedEvents();
+  if (!joined.includes(id)) {
+    localStorage.setItem(JOINED_EVENTS_KEY, JSON.stringify([...joined, id]));
+  }
+}
+
+function useJoin(
+  type: "event" | "club",
+  id: string,
+  platform: Platform,
+  payment?: number,
+) {
   const { isAuthenticated, token } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [authInitialScreen, setAuthInitialScreen] = useState<"welcome" | "googleProfile">("welcome");
   const [joinResult, setJoinResult] = useState<JoinResult>(null);
+  const [isParticipant, setIsParticipant] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Check localStorage for prior join, then verify with backend using user token
+  useEffect(() => {
+    if (type === "event" && getJoinedEvents().includes(id)) {
+      setIsParticipant(true);
+      return;
+    }
+    if (type === "event" && isAuthenticated && token) {
+      fetch(`/api/event-status?postId=${id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((r) => r.json() as Promise<{ currentUserStatus?: string }>)
+        .then(({ currentUserStatus }) => {
+          if (currentUserStatus === "PARTICIPATING" || currentUserStatus === "OWNER") {
+            setIsParticipant(true);
+            markEventJoined(id);
+          }
+        })
+        .catch(() => undefined);
+    }
+  }, [id, type, isAuthenticated, token]);
 
   async function handleJoin() {
     if (platform === "desktop" || platform === "unknown") {
       if (isAuthenticated && token) {
-        // Already logged in — join directly
-        try {
-          const res = await fetch("/api/join", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ type, id }),
-          });
-          const data = (await res.json()) as { success?: boolean; error?: string };
-          if (data.success) {
-            setJoinResult("joined");
-          } else {
-            const msg = (data.error ?? "").toLowerCase();
-            if (msg.includes("already")) setJoinResult("already");
-            else if (msg.includes("request")) setJoinResult("requested");
-            else if (["started", "ended", "past", "expired"].some((k) => msg.includes(k))) setJoinResult("ended");
-            else setJoinResult("error");
+        const isPaid = type === "event" && payment && payment > 0;
+        if (isPaid) {
+          // Paid event → open payment modal
+          setShowPaymentModal(true);
+        } else {
+          // Free event → join directly
+          try {
+            const res = await fetch("/api/join", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ type, id }),
+            });
+            const data = (await res.json()) as { success?: boolean; error?: string };
+            if (data.success) {
+              setJoinResult("joined");
+              if (type === "event") markEventJoined(id);
+            } else {
+              const msg = (data.error ?? "").toLowerCase();
+              if (msg.includes("already")) {
+                setJoinResult("already");
+                if (type === "event") markEventJoined(id);
+              } else if (msg.includes("request")) setJoinResult("requested");
+              else if (["started", "ended", "past", "expired"].some((k) => msg.includes(k))) setJoinResult("ended");
+              else setJoinResult("error");
+            }
+          } catch {
+            setJoinResult("error");
           }
-        } catch {
-          setJoinResult("error");
         }
       } else {
         setShowAuthModal(true);
@@ -189,7 +244,22 @@ function useJoin(type: "event" | "club", id: string, platform: Platform) {
     }, 1800);
   }
 
-  return { showModal, setShowModal, showAuthModal, setShowAuthModal, authInitialScreen, setAuthInitialScreen, joinResult, setJoinResult, handleJoin };
+  function handlePaymentSuccess() {
+    setShowPaymentModal(false);
+    setIsParticipant(true);
+    if (type === "event") markEventJoined(id);
+  }
+
+  return {
+    showModal, setShowModal,
+    showAuthModal, setShowAuthModal,
+    showPaymentModal, setShowPaymentModal,
+    authInitialScreen, setAuthInitialScreen,
+    joinResult, setJoinResult,
+    isParticipant,
+    handleJoin,
+    handlePaymentSuccess,
+  };
 }
 
 // ── JoinCTA (inline, right column) ────────────────────────────────────────
@@ -200,6 +270,8 @@ interface Props {
   count?: number;
   interests?: Interest[];
   location?: Location;
+  payment?: number;
+  currency?: Currency;
 }
 
 function joinResultMessage(result: JoinResult, type: "event" | "club"): string {
@@ -210,12 +282,26 @@ function joinResultMessage(result: JoinResult, type: "event" | "club"): string {
   return "Something went wrong. Please try again.";
 }
 
-export default function JoinCTA({ type, id, count, interests, location }: Props) {
+export default function JoinCTA({ type, id, count, interests, location, payment, currency }: Props) {
+  const { token } = useAuth();
   const [platform, setPlatform] = useState<Platform>("unknown");
   useEffect(() => setPlatform(detectPlatform()), []);
 
-  const label = type === "event" ? "Join Event" : "Join Club";
-  const { showModal, setShowModal, showAuthModal, setShowAuthModal, authInitialScreen, setAuthInitialScreen, joinResult, setJoinResult, handleJoin } = useJoin(type, id, platform);
+  const isPaidEvent = type === "event" && !!payment && payment > 0;
+  const label = isPaidEvent
+    ? `Join Event · ${currency?.symbol ?? ""}${payment}`
+    : type === "event" ? "Join Event" : "Join Club";
+
+  const {
+    showModal, setShowModal,
+    showAuthModal, setShowAuthModal,
+    showPaymentModal, setShowPaymentModal,
+    authInitialScreen, setAuthInitialScreen,
+    joinResult, setJoinResult,
+    isParticipant,
+    handleJoin,
+    handlePaymentSuccess,
+  } = useJoin(type, id, platform, payment);
 
   useEffect(() => {
     const flag = localStorage.getItem("togeda_google_auth_complete");
@@ -241,14 +327,23 @@ export default function JoinCTA({ type, id, count, interests, location }: Props)
   return (
     <>
       <div className="flex flex-col gap-3">
-        <button
-          onClick={handleJoin}
-          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white py-4 text-base font-bold text-stone-900 shadow-lg transition-all active:scale-[0.98] hover:bg-stone-100"
-        >
-          <PlusIcon />
-          {label}
-        </button>
-        {joinResult && (
+        {isParticipant || joinResult === "joined" ? (
+          <div className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 py-4 text-base font-bold text-emerald-300">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-5 w-5 shrink-0">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+            {type === "event" ? "You're going!" : "You're a member!"}
+          </div>
+        ) : (
+          <button
+            onClick={handleJoin}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white py-4 text-base font-bold text-stone-900 shadow-lg transition-all active:scale-[0.98] hover:bg-stone-100"
+          >
+            <PlusIcon />
+            {label}
+          </button>
+        )}
+        {joinResult && joinResult !== "joined" && (
           <div className={`rounded-xl px-4 py-3 text-sm text-center font-medium ${joinResult === "error" ? "bg-red-500/15 text-red-300" : "bg-white/10 text-white"}`}>
             {joinResultMessage(joinResult, type)}
             <button onClick={() => setJoinResult(null)} className="ml-2 text-xs opacity-60 hover:opacity-100">✕</button>
@@ -273,19 +368,42 @@ export default function JoinCTA({ type, id, count, interests, location }: Props)
           initialScreen={authInitialScreen}
         />
       )}
+      {showPaymentModal && token && currency && (
+        <PaymentModal
+          postId={id}
+          payment={payment!}
+          currency={currency}
+          token={token}
+          onSuccess={handlePaymentSuccess}
+          onClose={() => setShowPaymentModal(false)}
+        />
+      )}
     </>
   );
 }
 
 // ── StickyJoinBar (fixed bottom, mobile only) ────────────────────────────
 
-export function StickyJoinBar({ type, id, count, interests, location }: Props) {
+export function StickyJoinBar({ type, id, count, interests, location, payment, currency }: Props) {
+  const { token } = useAuth();
   const [platform, setPlatform] = useState<Platform>("unknown");
   useEffect(() => setPlatform(detectPlatform()), []);
 
-  const label = type === "event" ? "Join Event" : "Join Club";
+  const isPaidEvent = type === "event" && !!payment && payment > 0;
+  const label = isPaidEvent
+    ? `Join · ${currency?.symbol ?? ""}${payment}`
+    : type === "event" ? "Join Event" : "Join Club";
   const isMobile = platform === "ios" || platform === "android";
-  const { showModal, setShowModal, showAuthModal, setShowAuthModal, authInitialScreen, setAuthInitialScreen, joinResult, setJoinResult, handleJoin } = useJoin(type, id, platform);
+  const {
+    showModal, setShowModal,
+    showAuthModal, setShowAuthModal,
+    showPaymentModal, setShowPaymentModal,
+    authInitialScreen, setAuthInitialScreen,
+    joinResult, setJoinResult,
+    isParticipant,
+    handleJoin,
+    handlePaymentSuccess,
+  } = useJoin(type, id, platform, payment);
 
   useEffect(() => {
     const flag = localStorage.getItem("togeda_google_auth_complete");
@@ -308,6 +426,8 @@ export function StickyJoinBar({ type, id, count, interests, location }: Props) {
 
   if (!isMobile) return null;
 
+  const alreadyJoined = isParticipant || joinResult === "joined";
+
   return (
     <>
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-stone-950/95 backdrop-blur-md">
@@ -321,15 +441,24 @@ export function StickyJoinBar({ type, id, count, interests, location }: Props) {
             )}
             <span className="text-xs text-stone-500">Open in Togeda app</span>
           </div>
-          <button
-            onClick={handleJoin}
-            className="ml-auto flex shrink-0 items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-bold text-stone-900 transition-transform active:scale-95"
-          >
-            <PlusIcon />
-            {label}
-          </button>
+          {alreadyJoined ? (
+            <div className="ml-auto flex shrink-0 items-center gap-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 px-6 py-3 text-sm font-bold text-emerald-300">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4 shrink-0">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              </svg>
+              {type === "event" ? "You're going!" : "Joined!"}
+            </div>
+          ) : (
+            <button
+              onClick={handleJoin}
+              className="ml-auto flex shrink-0 items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-bold text-stone-900 transition-transform active:scale-95"
+            >
+              <PlusIcon />
+              {label}
+            </button>
+          )}
         </div>
-        {joinResult && (
+        {joinResult && joinResult !== "joined" && (
           <div
             className="border-t border-white/10 px-6 py-2 text-xs text-center text-stone-300 cursor-pointer"
             onClick={() => setJoinResult(null)}
@@ -348,6 +477,16 @@ export function StickyJoinBar({ type, id, count, interests, location }: Props) {
           location={defaultLocation}
           onClose={() => setShowAuthModal(false)}
           initialScreen={authInitialScreen}
+        />
+      )}
+      {showPaymentModal && token && currency && (
+        <PaymentModal
+          postId={id}
+          payment={payment!}
+          currency={currency}
+          token={token}
+          onSuccess={handlePaymentSuccess}
+          onClose={() => setShowPaymentModal(false)}
         />
       )}
     </>
