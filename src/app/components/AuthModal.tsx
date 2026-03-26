@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useGoogleLogin } from "@react-oauth/google";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "./AuthContext";
 
@@ -24,15 +25,22 @@ interface ProfileData {
   firstName: string;
   lastName: string;
   gender: string;
+  visibleGender: boolean;
   birthDate: string;
+  occupation: string;
+  phoneNumber: string;
   location: Location;
   interests: Interest[];
+  profilePhotos: string[];
+  subToEmail: boolean;
+  referralCodeUsed: string;
 }
 
 type Screen =
   | "welcome"
   | "login"
   | "register"
+  | "registerDetails"
   | "verify"
   | "googleProfile"
   | "joining"
@@ -46,6 +54,7 @@ interface Props {
   location?: Location;
   onClose: () => void;
   initialScreen?: Screen;
+  required?: boolean;
 }
 
 // ── Validation ────────────────────────────────────────────────────────────────
@@ -207,14 +216,28 @@ export default function AuthModal({
   location,
   onClose,
   initialScreen,
+  required = false,
 }: Props) {
-  const { setToken, setDisplayName } = useAuth();
+  const { setToken, setDisplayName, logout } = useAuth();
   const noun = type === "event" ? "event" : "club";
   const hasJoinContext = !!type && !!id;
+
+  const loginWithGoogle = useGoogleLogin({
+    flow: "auth-code",
+    onSuccess: (codeResponse) => void handleGoogleCode(codeResponse.code),
+    onError: () => {
+      setLoading(false);
+      setError("Google sign-in failed. Please try again.");
+    },
+  });
 
   const [screen, setScreen] = useState<Screen>(initialScreen ?? "welcome");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const regMonthRef = useRef<HTMLInputElement>(null);
+  const regYearRef = useRef<HTMLInputElement>(null);
+const photoInputRef = useRef<HTMLInputElement>(null);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -230,6 +253,12 @@ export default function AuthModal({
     month: "",
     year: "",
     gender: "",
+    visibleGender: true,
+    occupation: "Work",
+    phoneNumber: Array.from({ length: 15 }, () => Math.floor(Math.random() * 10)).join(""),
+    photoUrl: "",
+    subToEmail: true,
+    referralCode: "",
   });
   const [regErrors, setRegErrors] = useState({
     email: "",
@@ -241,39 +270,40 @@ export default function AuthModal({
     month: "",
     year: "",
     gender: "",
+    occupation: "",
   });
   const [showRegPw, setShowRegPw] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
 
   const [verifyCode, setVerifyCode] = useState("");
 
-  const [profileForm, setProfileForm] = useState({
-    firstName: "",
-    lastName: "",
-    day: "",
-    month: "",
-    year: "",
-    gender: "",
-  });
-  const [profileErrors, setProfileErrors] = useState({
-    firstName: "",
-    lastName: "",
-    day: "",
-    month: "",
-    year: "",
-    gender: "",
-  });
-
   const [successType, setSuccessType] = useState<"joined" | "requested" | "already" | "ended">("joined");
 
-  // Close on Escape
+  // Pre-fill email/password from localStorage when resuming a pending verification
   useEffect(() => {
+    if (initialScreen === "verify") {
+      const pendingEmail = localStorage.getItem("togeda_pending_email");
+      const pendingPassword = localStorage.getItem("togeda_pending_password");
+      if (pendingEmail ?? pendingPassword) {
+        setRegForm((f) => ({
+          ...f,
+          email: pendingEmail ?? f.email,
+          password: pendingPassword ?? f.password,
+        }));
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Close on Escape (disabled when required)
+  useEffect(() => {
+    if (required) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [onClose, required]);
 
   // Trigger Google profile check when that screen becomes active
   useEffect(() => {
@@ -326,19 +356,28 @@ export default function AuthModal({
 
   // ── Google sign-in ───────────────────────────────────────────────────────────
 
-  function handleGoogleSignIn() {
-    const callbackUrl = window.location.origin + "/auth/callback";
-    const returnTo = window.location.pathname + window.location.search;
-    localStorage.setItem("togeda_return_to", returnTo);
-    localStorage.setItem("togeda_pending_join", JSON.stringify({ type, id }));
-    // Use URLSearchParams.toString() which encodes spaces as + (required by Cognito)
-    const params = new URLSearchParams({
-      client_id: "1056r625pmmd5cieos665rceii",
-      response_type: "token",
-      scope: "aws.cognito.signin.user.admin email openid phone",
-      redirect_uri: callbackUrl,
-    });
-    window.location.href = `https://togeda-main.auth.eu-central-1.amazoncognito.com/login?${params.toString()}`;
+  async function handleGoogleCode(code: string) {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const data = (await res.json()) as { token?: string; error?: string };
+      if (!res.ok || !data.token) {
+        setError(data.error ?? "Google sign-in failed.");
+        setLoading(false);
+        return;
+      }
+      // Store token temporarily — don't log in yet until profile is confirmed
+      localStorage.setItem("togeda_token", data.token);
+      setScreen("googleProfile"); // triggers checkGoogleUserProfile via useEffect
+    } catch {
+      setError("Network error. Please try again.");
+      setLoading(false);
+    }
   }
 
   // ── Check Google user profile ─────────────────────────────────────────────
@@ -408,7 +447,7 @@ export default function AuthModal({
 
   // ── Register ─────────────────────────────────────────────────────────────────
 
-  function validateRegForm(): boolean {
+  function validateRegBasic(): boolean {
     const errors = {
       email: "",
       password: "",
@@ -419,6 +458,7 @@ export default function AuthModal({
       month: "",
       year: "",
       gender: "",
+      occupation: "",
     };
     let valid = true;
 
@@ -434,6 +474,26 @@ export default function AuthModal({
       errors.confirmPassword = "Passwords do not match.";
       valid = false;
     }
+
+    setRegErrors(errors);
+    return valid;
+  }
+
+  function validateRegDetails(): boolean {
+    const errors = {
+      email: "",
+      password: "",
+      confirmPassword: "",
+      firstName: "",
+      lastName: "",
+      day: "",
+      month: "",
+      year: "",
+      gender: "",
+      occupation: "",
+    };
+    let valid = true;
+
     if (!isValidName(regForm.firstName)) {
       errors.firstName = "First name must be at least 3 letters.";
       valid = false;
@@ -456,13 +516,18 @@ export default function AuthModal({
       errors.gender = "Please select a gender.";
       valid = false;
     }
+    if (!regForm.occupation.trim()) {
+      errors.occupation = "Please enter your occupation.";
+      valid = false;
+    }
 
     setRegErrors(errors);
     return valid;
   }
 
-  async function handleRegister() {
-    if (!validateRegForm()) return;
+  async function handleSignUp() {
+    if (!validateRegBasic()) return;
+    setError("");
     setLoading(true);
     try {
       const res = await fetch("/api/auth/register", {
@@ -476,6 +541,9 @@ export default function AuthModal({
         setLoading(false);
         return;
       }
+      // Persist so we can resume after a page refresh
+      localStorage.setItem("togeda_pending_email", regForm.email);
+      localStorage.setItem("togeda_pending_password", regForm.password);
       setScreen("verify");
     } catch {
       setError("Network error. Please try again.");
@@ -484,17 +552,27 @@ export default function AuthModal({
     }
   }
 
-  // ── Verify ───────────────────────────────────────────────────────────────────
+  function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setRegForm((f) => ({ ...f, photoUrl: reader.result as string }));
+    };
+    reader.readAsDataURL(file);
+  }
 
-  async function handleVerify() {
-    if (verifyCode.length !== 6) {
-      setError("Enter the 6-digit code from your email.");
-      return;
-    }
-    setError("");
+  async function handleRegisterDetailsSubmit() {
+    if (!validateRegDetails()) return;
     setLoading(true);
-
     try {
+      const token = localStorage.getItem("togeda_token");
+      if (!token) {
+        setError("Session expired. Please start over.");
+        setScreen("register");
+        return;
+      }
+
       const geo = await getUserLocation();
       const loc: Location = {
         name: location?.name ?? "",
@@ -515,11 +593,52 @@ export default function AuthModal({
         firstName: regForm.firstName.trim(),
         lastName: regForm.lastName.trim(),
         gender: regForm.gender,
+        visibleGender: regForm.visibleGender,
         birthDate,
+        occupation: regForm.occupation.trim(),
+        phoneNumber: regForm.phoneNumber.trim(),
         location: loc,
         interests,
+        profilePhotos: regForm.photoUrl.trim() ? [regForm.photoUrl.trim()] : [],
+        subToEmail: regForm.subToEmail,
+        referralCodeUsed: regForm.referralCode.trim(),
       };
 
+      const res = await fetch("/api/auth/profile", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(profile),
+      });
+      const data = (await res.json()) as { success?: boolean; error?: string };
+      if (!res.ok) {
+        setError(data.error ?? "Failed to save profile.");
+        setLoading(false);
+        return;
+      }
+
+      localStorage.setItem("togeda_display_name", regForm.firstName.trim());
+      setToken(token);
+      await performJoin(token);
+    } catch {
+      setError("Network error. Please try again.");
+      setLoading(false);
+    }
+  }
+
+  // ── Verify ───────────────────────────────────────────────────────────────────
+
+  async function handleVerify() {
+    if (verifyCode.length !== 6) {
+      setError("Enter the 6-digit code from your email.");
+      return;
+    }
+    setError("");
+    setLoading(true);
+
+    try {
       const res = await fetch("/api/auth/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -527,7 +646,6 @@ export default function AuthModal({
           email: regForm.email,
           password: regForm.password,
           code: verifyCode,
-          profile,
         }),
       });
       const data = (await res.json()) as { success?: boolean; token?: string; error?: string };
@@ -536,9 +654,26 @@ export default function AuthModal({
         setLoading(false);
         return;
       }
-      localStorage.setItem("togeda_display_name", regForm.firstName.trim());
-      setToken(data.token!);
-      await performJoin(data.token!);
+
+      const token = data.token!;
+      localStorage.setItem("togeda_token", token);
+      localStorage.removeItem("togeda_pending_email");
+      localStorage.removeItem("togeda_pending_password");
+
+      // Check if user already has a profile
+      const meRes = await fetch("/api/auth/me", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (meRes.ok) {
+        const profile = (await meRes.json()) as { firstName?: string };
+        if (profile.firstName) localStorage.setItem("togeda_display_name", profile.firstName);
+        setToken(token);
+        await performJoin(token);
+      } else {
+        // No profile yet — let them fill it in
+        setLoading(false);
+        setScreen("registerDetails");
+      }
     } catch {
       setError("Network error. Please try again.");
       setLoading(false);
@@ -557,106 +692,6 @@ export default function AuthModal({
     }
   }
 
-  // ── Google Profile ────────────────────────────────────────────────────────────
-
-  function validateProfileForm(): boolean {
-    const errors = {
-      firstName: "",
-      lastName: "",
-      day: "",
-      month: "",
-      year: "",
-      gender: "",
-    };
-    let valid = true;
-
-    if (!isValidName(profileForm.firstName)) {
-      errors.firstName = "First name must be at least 3 letters.";
-      valid = false;
-    }
-    if (!isValidName(profileForm.lastName)) {
-      errors.lastName = "Last name must be at least 3 letters.";
-      valid = false;
-    }
-    if (!validDate(profileForm.day, profileForm.month, profileForm.year)) {
-      errors.day = "Enter a valid date.";
-      valid = false;
-    } else if (!validAge(profileForm.day, profileForm.month, profileForm.year)) {
-      errors.year = "Year is out of range.";
-      valid = false;
-    } else if (!hasAge18(profileForm.day, profileForm.month, profileForm.year)) {
-      errors.day = "You must be at least 18 years old.";
-      valid = false;
-    }
-    if (!profileForm.gender) {
-      errors.gender = "Please select a gender.";
-      valid = false;
-    }
-
-    setProfileErrors(errors);
-    return valid;
-  }
-
-  async function handleGoogleProfileSubmit() {
-    if (!validateProfileForm()) return;
-    setLoading(true);
-    try {
-      const token = localStorage.getItem("togeda_token");
-      if (!token) {
-        setScreen("welcome");
-        return;
-      }
-
-      const geo = await getUserLocation();
-      const loc: Location = {
-        name: location?.name ?? "",
-        address: location?.address ?? "",
-        city: location?.city ?? "",
-        state: location?.state ?? "",
-        country: location?.country ?? "",
-        latitude: geo?.lat ?? location?.latitude ?? 0,
-        longitude: geo?.lon ?? location?.longitude ?? 0,
-      };
-
-      const d = parseInt(profileForm.day, 10);
-      const m = parseInt(profileForm.month, 10);
-      const y = parseInt(profileForm.year, 10);
-      const birthDate = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-
-      const profileData: ProfileData = {
-        firstName: profileForm.firstName.trim(),
-        lastName: profileForm.lastName.trim(),
-        gender: profileForm.gender,
-        birthDate,
-        location: loc,
-        interests,
-      };
-
-      const res = await fetch("/api/auth/profile", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(profileData),
-      });
-
-      const data = (await res.json()) as { success?: boolean; error?: string };
-      if (!res.ok) {
-        setError(data.error ?? "Failed to save profile.");
-        setLoading(false);
-        return;
-      }
-
-      localStorage.setItem("togeda_display_name", profileForm.firstName.trim());
-      setToken(token);
-      await performJoin(token);
-    } catch {
-      setError("Network error. Please try again.");
-      setLoading(false);
-    }
-  }
-
   // ── Render screens ────────────────────────────────────────────────────────────
 
   function renderContent() {
@@ -667,10 +702,12 @@ export default function AuthModal({
         return LoginScreen();
       case "register":
         return RegisterScreen();
+      case "registerDetails":
+        return RegisterDetailsScreen();
       case "verify":
         return VerifyScreen();
       case "googleProfile":
-        return GoogleProfileScreen();
+        return RegisterDetailsScreen();
       case "joining":
         return JoiningScreen();
       case "success":
@@ -701,10 +738,13 @@ export default function AuthModal({
 
         <div className="flex flex-col gap-3">
           <button
-            onClick={handleGoogleSignIn}
-            className="flex w-full items-center justify-center gap-3 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-stone-900 hover:bg-stone-100 transition-colors"
+            onClick={() => { setLoading(true); loginWithGoogle(); }}
+            disabled={loading}
+            className="flex w-full items-center justify-center gap-3 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-stone-900 hover:bg-stone-100 transition-colors disabled:opacity-60"
           >
-            <GoogleIcon />
+            {loading
+              ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-stone-400 border-t-stone-900" />
+              : <GoogleIcon />}
             Continue with Google
           </button>
 
@@ -728,6 +768,7 @@ export default function AuthModal({
               Create account
             </button>
           </div>
+          {error && <p className="text-center text-sm text-red-400">{error}</p>}
         </div>
       </div>
     );
@@ -924,6 +965,89 @@ export default function AuthModal({
             {regErrors.confirmPassword && <p className={errorCls}>{regErrors.confirmPassword}</p>}
           </div>
 
+          {error && <p className="text-sm text-red-400">{error}</p>}
+
+          <button
+            onClick={() => void handleSignUp()}
+            disabled={loading}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-3 text-sm font-bold text-stone-900 hover:bg-stone-100 transition-colors disabled:opacity-50"
+          >
+            {loading && <div className="h-4 w-4 animate-spin rounded-full border-2 border-stone-400 border-t-stone-900" />}
+            Continue
+          </button>
+
+          <p className="text-center text-xs text-stone-500">
+            Already have an account?{" "}
+            <button onClick={() => setScreen("login")} className="text-white underline hover:no-underline">
+              Log in
+            </button>
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  function RegisterDetailsScreen() {
+    return (
+      <div className="p-6 pb-8">
+        <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
+        <div className="mb-6 flex items-center gap-3">
+          <div className="flex-1">
+            <h2 className="text-lg font-bold text-white">About you</h2>
+            <p className="text-xs text-stone-500">Almost done — just a few details</p>
+          </div>
+          {(required || screen === "googleProfile") && (
+            <button
+              onClick={() => { logout(); onClose(); }}
+              className="text-xs text-stone-500 hover:text-white transition-colors"
+            >
+              Log out
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-4">
+          {/* Profile photo picker */}
+          <div className="flex flex-col items-center gap-2">
+            <div className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={regForm.photoUrl || "/default-profile-image.png"}
+                alt="Profile photo"
+                className="h-20 w-20 rounded-full object-cover ring-2 ring-white/10"
+              />
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                className="absolute bottom-0 right-0 flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-md transition-transform hover:scale-110 active:scale-95"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5 text-stone-900">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
+                </svg>
+              </button>
+            </div>
+            <p className="text-xs text-stone-500">
+              Profile photo <span className="text-stone-600">(optional)</span>
+            </p>
+            {regForm.photoUrl && (
+              <button
+                type="button"
+                onClick={() => setRegForm((f) => ({ ...f, photoUrl: "" }))}
+                className="text-xs text-stone-600 hover:text-stone-400 transition-colors"
+              >
+                Remove photo
+              </button>
+            )}
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handlePhotoChange}
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>First name</label>
@@ -955,25 +1079,35 @@ export default function AuthModal({
               <input
                 type="text"
                 value={regForm.day}
-                onChange={(e) => setRegForm((f) => ({ ...f, day: e.target.value }))}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, "").slice(0, 2);
+                  setRegForm((f) => ({ ...f, day: val }));
+                  if (val.length === 2) regMonthRef.current?.focus();
+                }}
                 placeholder="DD"
                 maxLength={2}
                 inputMode="numeric"
                 className={inputCls + " text-center"}
               />
               <input
+                ref={regMonthRef}
                 type="text"
                 value={regForm.month}
-                onChange={(e) => setRegForm((f) => ({ ...f, month: e.target.value }))}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, "").slice(0, 2);
+                  setRegForm((f) => ({ ...f, month: val }));
+                  if (val.length === 2) regYearRef.current?.focus();
+                }}
                 placeholder="MM"
                 maxLength={2}
                 inputMode="numeric"
                 className={inputCls + " text-center"}
               />
               <input
+                ref={regYearRef}
                 type="text"
                 value={regForm.year}
-                onChange={(e) => setRegForm((f) => ({ ...f, year: e.target.value }))}
+                onChange={(e) => setRegForm((f) => ({ ...f, year: e.target.value.replace(/\D/g, "").slice(0, 4) }))}
                 placeholder="YYYY"
                 maxLength={4}
                 inputMode="numeric"
@@ -986,22 +1120,76 @@ export default function AuthModal({
 
           <div>
             <label className={labelCls}>Gender</label>
-            <select
-              value={regForm.gender}
-              onChange={(e) => setRegForm((f) => ({ ...f, gender: e.target.value }))}
-              className={inputCls}
-            >
-              <option value="" disabled>Select gender</option>
-              <option value="MALE">Male</option>
-              <option value="FEMALE">Female</option>
-            </select>
+            <div className="grid grid-cols-2 gap-2">
+              {(["MALE", "FEMALE"] as const).map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => setRegForm((f) => ({ ...f, gender: g }))}
+                  className={`rounded-xl border py-3 text-sm font-semibold transition-colors ${
+                    regForm.gender === g
+                      ? "border-white bg-white text-stone-900"
+                      : "border-white/10 bg-white/5 text-stone-300 hover:bg-white/10"
+                  }`}
+                >
+                  {g === "MALE" ? "Male" : "Female"}
+                </button>
+              ))}
+            </div>
             {regErrors.gender && <p className={errorCls}>{regErrors.gender}</p>}
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-xs text-stone-400">Show gender on profile</span>
+              <button
+                type="button"
+                onClick={() => setRegForm((f) => ({ ...f, visibleGender: !f.visibleGender }))}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${regForm.visibleGender ? "bg-white" : "bg-white/20"}`}
+              >
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-stone-900 transition-transform ${regForm.visibleGender ? "translate-x-4" : "translate-x-1"}`} />
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls}>Occupation</label>
+            <input
+              type="text"
+              value={regForm.occupation}
+              onChange={(e) => setRegForm((f) => ({ ...f, occupation: e.target.value }))}
+              placeholder="e.g. Software Engineer"
+              className={inputCls}
+            />
+            {regErrors.occupation && <p className={errorCls}>{regErrors.occupation}</p>}
+          </div>
+
+          <div>
+            <label className={labelCls}>Phone number <span className="text-stone-600">(optional)</span></label>
+            <input
+              type="tel"
+              value={regForm.phoneNumber}
+              onChange={(e) => setRegForm((f) => ({ ...f, phoneNumber: e.target.value }))}
+              placeholder="+1 555 000 0000"
+              className={inputCls}
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-white">Email updates</p>
+              <p className="text-xs text-stone-500">Receive news and activity alerts</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRegForm((f) => ({ ...f, subToEmail: !f.subToEmail }))}
+              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${regForm.subToEmail ? "bg-white" : "bg-white/20"}`}
+            >
+              <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-stone-900 transition-transform ${regForm.subToEmail ? "translate-x-4" : "translate-x-1"}`} />
+            </button>
           </div>
 
           {error && <p className="text-sm text-red-400">{error}</p>}
 
           <button
-            onClick={() => void handleRegister()}
+            onClick={() => void handleRegisterDetailsSubmit()}
             disabled={loading}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-3 text-sm font-bold text-stone-900 hover:bg-stone-100 transition-colors disabled:opacity-50"
           >
@@ -1017,6 +1205,16 @@ export default function AuthModal({
     return (
       <div className="p-6 pb-8">
         <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
+        {required && (
+          <div className="mb-4 flex justify-end">
+            <button
+              onClick={() => { localStorage.removeItem("togeda_pending_email"); localStorage.removeItem("togeda_pending_password"); onClose(); }}
+              className="text-xs text-stone-500 hover:text-white transition-colors"
+            >
+              Log out
+            </button>
+          </div>
+        )}
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
           <EnvelopeIcon />
           <div>
@@ -1060,124 +1258,6 @@ export default function AuthModal({
               Resend
             </button>
           </p>
-        </div>
-      </div>
-    );
-  }
-
-  function GoogleProfileScreen() {
-    if (loading) {
-      return (
-        <div className="flex flex-col items-center justify-center gap-4 p-10">
-          <SpinnerIcon />
-          <p className="text-sm text-stone-400">Loading…</p>
-        </div>
-      );
-    }
-
-    if (error) {
-      return (
-        <div className="p-6 text-center">
-          <p className="text-sm text-red-400">{error}</p>
-        </div>
-      );
-    }
-
-    return (
-      <div className="p-6 pb-8">
-        <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
-        <div className="mb-6">
-          <h2 className="text-lg font-bold text-white">Just a few details</h2>
-          <p className="mt-1 text-sm text-stone-400">
-            Tell us about yourself to complete your account
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={labelCls}>First name</label>
-              <input
-                type="text"
-                value={profileForm.firstName}
-                onChange={(e) => setProfileForm((f) => ({ ...f, firstName: e.target.value }))}
-                placeholder="First name"
-                className={inputCls}
-              />
-              {profileErrors.firstName && <p className={errorCls}>{profileErrors.firstName}</p>}
-            </div>
-            <div>
-              <label className={labelCls}>Last name</label>
-              <input
-                type="text"
-                value={profileForm.lastName}
-                onChange={(e) => setProfileForm((f) => ({ ...f, lastName: e.target.value }))}
-                placeholder="Last name"
-                className={inputCls}
-              />
-              {profileErrors.lastName && <p className={errorCls}>{profileErrors.lastName}</p>}
-            </div>
-          </div>
-
-          <div>
-            <label className={labelCls}>Birthday</label>
-            <div className="grid grid-cols-3 gap-2">
-              <input
-                type="text"
-                value={profileForm.day}
-                onChange={(e) => setProfileForm((f) => ({ ...f, day: e.target.value }))}
-                placeholder="DD"
-                maxLength={2}
-                inputMode="numeric"
-                className={inputCls + " text-center"}
-              />
-              <input
-                type="text"
-                value={profileForm.month}
-                onChange={(e) => setProfileForm((f) => ({ ...f, month: e.target.value }))}
-                placeholder="MM"
-                maxLength={2}
-                inputMode="numeric"
-                className={inputCls + " text-center"}
-              />
-              <input
-                type="text"
-                value={profileForm.year}
-                onChange={(e) => setProfileForm((f) => ({ ...f, year: e.target.value }))}
-                placeholder="YYYY"
-                maxLength={4}
-                inputMode="numeric"
-                className={inputCls + " text-center"}
-              />
-            </div>
-            {profileErrors.day && <p className={errorCls}>{profileErrors.day}</p>}
-            {profileErrors.year && <p className={errorCls}>{profileErrors.year}</p>}
-          </div>
-
-          <div>
-            <label className={labelCls}>Gender</label>
-            <select
-              value={profileForm.gender}
-              onChange={(e) => setProfileForm((f) => ({ ...f, gender: e.target.value }))}
-              className={inputCls}
-            >
-              <option value="" disabled>Select gender</option>
-              <option value="MALE">Male</option>
-              <option value="FEMALE">Female</option>
-            </select>
-            {profileErrors.gender && <p className={errorCls}>{profileErrors.gender}</p>}
-          </div>
-
-          {error && <p className="text-sm text-red-400">{error}</p>}
-
-          <button
-            onClick={() => void handleGoogleProfileSubmit()}
-            disabled={loading}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-3 text-sm font-bold text-stone-900 hover:bg-stone-100 transition-colors disabled:opacity-50"
-          >
-            {loading && <div className="h-4 w-4 animate-spin rounded-full border-2 border-stone-400 border-t-stone-900" />}
-            Complete Profile
-          </button>
         </div>
       </div>
     );
@@ -1248,7 +1328,7 @@ export default function AuthModal({
   return createPortal(
     <div
       className="fixed inset-0 z-[9999] flex items-end justify-center sm:items-center"
-      onClick={onClose}
+      onClick={required ? undefined : onClose}
     >
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <div

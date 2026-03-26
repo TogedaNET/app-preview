@@ -20,15 +20,41 @@ export default function UserBadge() {
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<UserInfo | null>(null);
   const [showAuth, setShowAuth] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const hasAutoOpenedModal = useRef(false);
 
+  // Case 1: logged in but profile incomplete → open registerDetails
   useEffect(() => {
-    if (!isAuthenticated || !token) return;
+    if (!isAuthenticated || !token || hasAutoOpenedModal.current) return;
     void fetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => (r.ok ? (r.json() as Promise<UserInfo>) : null))
-      .then((d) => { if (d) setInfo(d); })
+      .then((d) => {
+        if (d) {
+          setInfo(d);
+          if (!d.firstName && !hasAutoOpenedModal.current) {
+            hasAutoOpenedModal.current = true;
+            setShowProfileModal(true);
+          }
+        } else if (!hasAutoOpenedModal.current) {
+          // 404 — no profile at all
+          hasAutoOpenedModal.current = true;
+          setShowProfileModal(true);
+        }
+      })
       .catch(() => undefined);
   }, [isAuthenticated, token]);
+
+  // Case 2: registered but email not yet confirmed → open verify
+  useEffect(() => {
+    const pendingEmail = localStorage.getItem("togeda_pending_email");
+    const storedToken = localStorage.getItem("togeda_token");
+    if (pendingEmail && !storedToken && !hasAutoOpenedModal.current) {
+      hasAutoOpenedModal.current = true;
+      setShowVerifyModal(true);
+    }
+  }, []);
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -49,6 +75,7 @@ export default function UserBadge() {
           Log in
         </button>
         {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
+        {showVerifyModal && <AuthModal initialScreen="verify" required onClose={() => setShowVerifyModal(false)} />}
       </>
     );
   }
@@ -125,6 +152,9 @@ export default function UserBadge() {
             </button>
           </div>
         </div>
+      )}
+      {showProfileModal && (
+        <AuthModal initialScreen="registerDetails" required onClose={() => setShowProfileModal(false)} />
       )}
     </div>
   );

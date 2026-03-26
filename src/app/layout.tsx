@@ -3,6 +3,7 @@ import "~/styles/globals.css";
 import { type Metadata } from "next";
 import { Geist } from "next/font/google";
 import { AuthProvider } from "./components/AuthContext";
+import GoogleProvider from "./components/GoogleProvider";
 import UserBadge from "./components/UserBadge";
 
 export const metadata: Metadata = {
@@ -20,11 +21,13 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${geist.variable}`}>
-      <body>
-        <AuthProvider>
-          <UserBadge />
-          {children}
-        </AuthProvider>
+      <body suppressHydrationWarning>
+        <GoogleProvider>
+          <AuthProvider>
+            <UserBadge />
+            {children}
+          </AuthProvider>
+        </GoogleProvider>
       </body>
     </html>
   );

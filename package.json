@@ -17,6 +17,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@react-oauth/google": "^0.13.4",
     "@t3-oss/env-nextjs": "^0.12.0",
     "next": "^15.2.3",
     "react": "^19.0.0",

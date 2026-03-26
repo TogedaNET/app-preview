@@ -1,14 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { cognitoConfirmSignUp, cognitoInitiateAuth, createUserProfile, type ProfileData } from "~/lib/cognito-utils";
-import { env } from "~/env.js";
+import { cognitoConfirmSignUp, cognitoInitiateAuth } from "~/lib/cognito-utils";
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, password, code, profile } = (await req.json()) as {
+    const { email, password, code } = (await req.json()) as {
       email: string;
       password: string;
       code: string;
-      profile: ProfileData;
     };
 
     try {
@@ -28,15 +26,6 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       const error = err as Error;
       return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
-    const profileRes = await createUserProfile(accessToken, profile, env.BACKEND_URL);
-    if (!profileRes.ok && profileRes.status !== 409) {
-      const body = await profileRes.text().catch(() => "");
-      return NextResponse.json(
-        { error: `Failed to create profile: ${body}` },
-        { status: 400 }
-      );
     }
 
     return NextResponse.json({ success: true, token: accessToken });

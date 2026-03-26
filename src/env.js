@@ -12,21 +12,23 @@ export const env = createEnv({
     COGNITO_USER_POOL_ID: z.string().min(1),
     COGNITO_SERVICE_USERNAME: z.string().min(1),
     COGNITO_SERVICE_PASSWORD: z.string().min(1),
+    GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
   },
 
   client: {
-    NEXT_PUBLIC_APP_URL: z.string().url(),
+    NEXT_PUBLIC_GOOGLE_CLIENT_ID: z.string().min(1).optional(),
   },
 
   runtimeEnv: {
     BACKEND_URL: process.env.BACKEND_URL,
-    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
     NODE_ENV: process.env.NODE_ENV,
     COGNITO_CLIENT_ID: process.env.COGNITO_CLIENT_ID,
     COGNITO_CLIENT_SECRET: process.env.COGNITO_CLIENT_SECRET,
     COGNITO_USER_POOL_ID: process.env.COGNITO_USER_POOL_ID,
     COGNITO_SERVICE_USERNAME: process.env.COGNITO_SERVICE_USERNAME,
     COGNITO_SERVICE_PASSWORD: process.env.COGNITO_SERVICE_PASSWORD,
+    GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
+    NEXT_PUBLIC_GOOGLE_CLIENT_ID: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
   },
 
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
