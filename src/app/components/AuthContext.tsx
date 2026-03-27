@@ -94,6 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   function logout() {
+    localStorage.removeItem("togeda_joined_events");
     setToken(null);
   }
 

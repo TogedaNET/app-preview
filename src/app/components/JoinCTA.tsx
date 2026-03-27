@@ -172,11 +172,10 @@ function useJoin(
 
   // Check localStorage for prior join, then verify with backend using user token
   useEffect(() => {
-    if (type === "event" && getJoinedEvents().includes(id)) {
-      setIsParticipant(true);
-      return;
-    }
-    if (type === "event" && isAuthenticated && token) {
+    if (type !== "event") return;
+    if (isAuthenticated && token) {
+      // Always verify with backend when authenticated so stale localStorage
+      // from a previous account doesn't bleed into the current session.
       fetch(`/api/event-status?postId=${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -185,9 +184,14 @@ function useJoin(
           if (currentUserStatus === "PARTICIPATING" || currentUserStatus === "OWNER") {
             setIsParticipant(true);
             markEventJoined(id);
+          } else {
+            setIsParticipant(false);
           }
         })
         .catch(() => undefined);
+    } else {
+      // Not authenticated — fall back to localStorage only
+      setIsParticipant(getJoinedEvents().includes(id));
     }
   }, [id, type, isAuthenticated, token]);
 

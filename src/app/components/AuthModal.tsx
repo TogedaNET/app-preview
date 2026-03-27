@@ -3,6 +3,8 @@
 import { useGoogleLogin } from "@react-oauth/google";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Cropper from "react-easy-crop";
+import type { Area } from "react-easy-crop";
 import { useAuth } from "./AuthContext";
 
 interface Interest {
@@ -238,6 +240,10 @@ export default function AuthModal({
   const regMonthRef = useRef<HTMLInputElement>(null);
   const regYearRef = useRef<HTMLInputElement>(null);
 const photoInputRef = useRef<HTMLInputElement>(null);
+  const [cropSrc, setCropSrc] = useState<string | null>(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -371,9 +377,33 @@ const photoInputRef = useRef<HTMLInputElement>(null);
         setLoading(false);
         return;
       }
-      // Store token temporarily — don't log in yet until profile is confirmed
-      localStorage.setItem("togeda_token", data.token);
-      setScreen("googleProfile"); // triggers checkGoogleUserProfile via useEffect
+      const authToken = data.token;
+      localStorage.setItem("togeda_token", authToken);
+
+      // Check profile while spinner is still showing — never flash the About You form
+      const meRes = await fetch("/api/auth/me", {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (meRes.ok) {
+        const profile = (await meRes.json()) as { firstName?: string };
+        if (profile.firstName) {
+          // Profile complete — log in directly, no About You
+          localStorage.setItem("togeda_display_name", profile.firstName);
+          setToken(authToken);
+          await performJoin(authToken);
+        } else {
+          // Profile exists but incomplete — show About You
+          setLoading(false);
+          setScreen("googleProfile");
+        }
+      } else if (meRes.status === 404) {
+        // No profile yet — show About You
+        setLoading(false);
+        setScreen("googleProfile");
+      } else {
+        setLoading(false);
+        setError("Failed to verify your account.");
+      }
     } catch {
       setError("Network error. Please try again.");
       setLoading(false);
@@ -394,10 +424,17 @@ const photoInputRef = useRef<HTMLInputElement>(null);
     });
     if (res.ok) {
       const profile = (await res.json()) as { firstName?: string };
-      if (profile.firstName) localStorage.setItem("togeda_display_name", profile.firstName);
-      setToken(token);
-      await performJoin(token);
+      if (profile.firstName) {
+        // Profile complete — log in and proceed
+        localStorage.setItem("togeda_display_name", profile.firstName);
+        setToken(token);
+        await performJoin(token);
+      } else {
+        // Profile record exists but firstName not filled yet — show About You
+        setLoading(false);
+      }
     } else if (res.status === 404) {
+      // No profile at all — show About You
       setLoading(false);
     } else {
       setLoading(false);
@@ -430,15 +467,30 @@ const photoInputRef = useRef<HTMLInputElement>(null);
         setLoading(false);
         return;
       }
-      setToken(data.token!);
-      // Fetch profile in background to get display name
-      void fetch("/api/auth/me", { headers: { Authorization: `Bearer ${data.token!}` } })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((p: { firstName?: string } | null) => {
-          if (p?.firstName) setDisplayName(p.firstName);
-        })
-        .catch(() => undefined);
-      await performJoin(data.token!);
+      const authToken = data.token!;
+      // Check profile while spinner is still showing — same pattern as Google flow
+      const meRes = await fetch("/api/auth/me", {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (meRes.ok) {
+        const profile = (await meRes.json()) as { firstName?: string };
+        if (profile.firstName) {
+          // Profile complete — log in and proceed
+          setDisplayName(profile.firstName);
+          setToken(authToken);
+          await performJoin(authToken);
+        } else {
+          // Profile exists but firstName not filled — show About You
+          localStorage.setItem("togeda_token", authToken);
+          setLoading(false);
+          setScreen("registerDetails");
+        }
+      } else {
+        // No profile yet (404) — show About You
+        localStorage.setItem("togeda_token", authToken);
+        setLoading(false);
+        setScreen("registerDetails");
+      }
     } catch {
       setError("Network error. Please try again.");
       setLoading(false);
@@ -555,11 +607,33 @@ const photoInputRef = useRef<HTMLInputElement>(null);
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = ""; // allow re-picking the same file
     const reader = new FileReader();
     reader.onload = () => {
-      setRegForm((f) => ({ ...f, photoUrl: reader.result as string }));
+      setCropSrc(reader.result as string);
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
     };
     reader.readAsDataURL(file);
+  }
+
+  async function getCroppedImageDataUrl(imageSrc: string, pixelCrop: Area): Promise<string> {
+    const image = new window.Image();
+    image.src = imageSrc;
+    await new Promise<void>((resolve) => { image.onload = () => resolve(); });
+    const canvas = document.createElement("canvas");
+    canvas.width = 600;
+    canvas.height = 1000;
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(image, pixelCrop.x, pixelCrop.y, pixelCrop.width, pixelCrop.height, 0, 0, 600, 1000);
+    return canvas.toDataURL("image/jpeg", 0.9);
+  }
+
+  async function confirmCrop() {
+    if (!cropSrc || !croppedAreaPixels) return;
+    const dataUrl = await getCroppedImageDataUrl(cropSrc, croppedAreaPixels);
+    setRegForm((f) => ({ ...f, photoUrl: dataUrl }));
+    setCropSrc(null);
   }
 
   async function handleRegisterDetailsSubmit() {
@@ -707,6 +781,15 @@ const photoInputRef = useRef<HTMLInputElement>(null);
       case "verify":
         return VerifyScreen();
       case "googleProfile":
+        // While checkGoogleUserProfile is running (JoinCTA redirect case), show spinner
+        if (loading) {
+          return (
+            <div className="flex flex-col items-center justify-center gap-4 p-12">
+              <SpinnerIcon />
+              <p className="text-sm text-stone-400">Checking your account…</p>
+            </div>
+          );
+        }
         return RegisterDetailsScreen();
       case "joining":
         return JoiningScreen();
@@ -1322,6 +1405,57 @@ const photoInputRef = useRef<HTMLInputElement>(null);
           Try again
         </button>
       </div>
+    );
+  }
+
+  if (cropSrc) {
+    return createPortal(
+      <div className="fixed inset-0 z-[10000] flex flex-col bg-stone-950">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+          <button
+            onClick={() => setCropSrc(null)}
+            className="text-sm text-stone-400 transition-colors hover:text-white"
+          >
+            Cancel
+          </button>
+          <p className="text-sm font-semibold text-white">Crop Photo</p>
+          <button
+            onClick={() => void confirmCrop()}
+            className="text-sm font-semibold text-white transition-colors hover:text-stone-300"
+          >
+            Done
+          </button>
+        </div>
+
+        {/* Cropper */}
+        <div className="relative flex-1">
+          <Cropper
+            image={cropSrc}
+            crop={crop}
+            zoom={zoom}
+            aspect={600 / 1000}
+            onCropChange={setCrop}
+            onZoomChange={setZoom}
+            onCropComplete={(_, pixels) => setCroppedAreaPixels(pixels)}
+          />
+        </div>
+
+        {/* Zoom slider */}
+        <div className="border-t border-white/10 px-6 py-4">
+          <p className="mb-2 text-center text-xs text-stone-500">Pinch or drag to adjust</p>
+          <input
+            type="range"
+            min={1}
+            max={3}
+            step={0.01}
+            value={zoom}
+            onChange={(e) => setZoom(Number(e.target.value))}
+            className="w-full accent-white"
+          />
+        </div>
+      </div>,
+      document.body
     );
   }
 

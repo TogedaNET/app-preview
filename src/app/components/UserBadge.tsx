@@ -29,19 +29,20 @@ export default function UserBadge() {
   useEffect(() => {
     if (!isAuthenticated || !token || hasAutoOpenedModal.current) return;
     void fetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => (r.ok ? (r.json() as Promise<UserInfo>) : null))
-      .then((d) => {
-        if (d) {
+      .then(async (r) => {
+        if (r.ok) {
+          const d = (await r.json()) as UserInfo;
           setInfo(d);
           if (!d.firstName && !hasAutoOpenedModal.current) {
             hasAutoOpenedModal.current = true;
             setShowProfileModal(true);
           }
-        } else if (!hasAutoOpenedModal.current) {
-          // 404 — no profile at all
+        } else if (r.status === 404 && !hasAutoOpenedModal.current) {
+          // Genuinely no profile — show About You
           hasAutoOpenedModal.current = true;
           setShowProfileModal(true);
         }
+        // Ignore transient errors (5xx, network) — don't spam the modal
       })
       .catch(() => undefined);
   }, [isAuthenticated, token]);
