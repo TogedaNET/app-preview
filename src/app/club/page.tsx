@@ -12,6 +12,7 @@ function formatDate(iso: string) {
     day: "numeric",
     month: "long",
     year: "numeric",
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   }).format(new Date(iso));
 }
 
