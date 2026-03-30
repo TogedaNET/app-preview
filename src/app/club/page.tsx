@@ -4,17 +4,9 @@ import ImageGallery from "../components/ImageGallery";
 import ParticipantScroller from "../components/ParticipantScroller";
 import JoinCTA, { StickyJoinBar } from "../components/JoinCTA";
 import AppRedirect from "../components/AppRedirect";
+import DateFormatter from "../components/DateFormatter";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatDate(iso: string) {
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-  }).format(new Date(iso));
-}
 
 function mapSrc(lat: number, lon: number) {
   const delta = 0.006;
@@ -130,7 +122,7 @@ function ClubDetailCard({ club }: { club: Club }) {
             </span>
             <div>
               <p className="text-sm font-medium text-white">Founded</p>
-              <p className="text-xs text-stone-400">{formatDate(club.createdAt)}</p>
+              <p className="text-xs text-stone-400"><DateFormatter iso={club.createdAt} /></p>
             </div>
           </li>
         )}
