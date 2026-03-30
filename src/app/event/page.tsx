@@ -4,6 +4,7 @@ import ImageGallery from "../components/ImageGallery";
 import ParticipantScroller from "../components/ParticipantScroller";
 import JoinCTA, { StickyJoinBar } from "../components/JoinCTA";
 import AppRedirect from "../components/AppRedirect";
+import EventDateFormatter from "../components/EventDateFormatter";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -117,7 +118,7 @@ function EventDetailCard({ event }: { event: Event }) {
           </span>
           <div>
             <p className="text-sm font-medium text-white">
-              {formatDateRange(event.fromDate, event.toDate)}
+              <EventDateFormatter fromDate={event.fromDate} toDate={event.toDate} />
             </p>
             <p className="text-xs text-stone-400">
               {isToday(event.fromDate) ? "Today · " : ""}
