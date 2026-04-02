@@ -6,6 +6,12 @@ export interface ProfileData {
   lastName: string;
   gender: string;
   birthDate: string;
+  visibleGender: boolean;
+  occupation: string;
+  phoneNumber: string;
+  profilePhotos: string[];
+  subToEmail: boolean;
+  referralCodeUsed: string;
   location: {
     name: string;
     address: string;
@@ -92,8 +98,6 @@ export async function createUserProfile(
   profileData: ProfileData,
   backendUrl: string
 ) {
-  const phoneNumber = String(Math.floor(1000000000 + Math.random() * 9000000000));
-
   const res = await fetch(`${backendUrl}/users/addBasicInfo`, {
     method: "POST",
     headers: {
@@ -101,20 +105,18 @@ export async function createUserProfile(
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
-      subToEmail: true,
+      subToEmail: profileData.subToEmail,
       firstName: profileData.firstName,
       lastName: profileData.lastName,
       gender: profileData.gender,
       birthDate: profileData.birthDate,
-      visibleGender: true,
+      visibleGender: profileData.visibleGender,
       location: profileData.location,
-      occupation: "working",
-      profilePhotos: [
-        "https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y",
-      ],
+      occupation: profileData.occupation,
+      profilePhotos: profileData.profilePhotos,
       interests: profileData.interests,
-      phoneNumber,
-      referralCodeUsed: null,
+      phoneNumber: profileData.phoneNumber,
+      referralCodeUsed: profileData.referralCodeUsed || null,
     }),
   });
 

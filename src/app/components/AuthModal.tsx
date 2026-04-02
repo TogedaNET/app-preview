@@ -53,7 +53,6 @@ interface Props {
   type?: "event" | "club";
   id?: string;
   interests?: Interest[];
-  location?: Location;
   onClose: () => void;
   initialScreen?: Screen;
   required?: boolean;
@@ -118,28 +117,6 @@ function validAge(day: string, month: string, year: string): boolean {
   return y >= currentYear - 120;
 }
 
-// ── Geolocation ───────────────────────────────────────────────────────────────
-
-async function getUserLocation(): Promise<{ lat: number; lon: number } | null> {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) {
-      resolve(null);
-      return;
-    }
-    const timer = setTimeout(() => resolve(null), 5000);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        clearTimeout(timer);
-        resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude });
-      },
-      () => {
-        clearTimeout(timer);
-        resolve(null);
-      },
-      { timeout: 5000 }
-    );
-  });
-}
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
@@ -215,7 +192,6 @@ export default function AuthModal({
   type,
   id,
   interests,
-  location,
   onClose,
   initialScreen,
   required = false,
@@ -244,6 +220,23 @@ const photoInputRef = useRef<HTMLInputElement>(null);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  // ── Location autocomplete ─────────────────────────────────────────────────
+  const [cityInput, setCityInput] = useState("");
+  const [citySuggestions, setCitySuggestions] = useState<google.maps.places.AutocompletePrediction[]>([]);
+  const [cityDropdownOpen, setCityDropdownOpen] = useState(false);
+  const [regLocation, setRegLocation] = useState<{
+    display: string;
+    city: string;
+    state: string;
+    country: string;
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const autocompleteServiceRef = useRef<google.maps.places.AutocompleteService | null>(null);
+  const placesServiceRef = useRef<google.maps.places.PlacesService | null>(null);
+  const cityInputRef = useRef<HTMLInputElement>(null);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -277,6 +270,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
     year: "",
     gender: "",
     occupation: "",
+    city: "",
   });
   const [showRegPw, setShowRegPw] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
@@ -543,6 +537,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
       year: "",
       gender: "",
       occupation: "",
+      city: "",
     };
     let valid = true;
 
@@ -570,6 +565,10 @@ const photoInputRef = useRef<HTMLInputElement>(null);
     }
     if (!regForm.occupation.trim()) {
       errors.occupation = "Please enter your occupation.";
+      valid = false;
+    }
+    if (!regLocation) {
+      errors.city = "Please select your city.";
       valid = false;
     }
 
@@ -604,6 +603,73 @@ const photoInputRef = useRef<HTMLInputElement>(null);
     }
   }
 
+  // ── Google Places ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if (!apiKey || autocompleteServiceRef.current) return;
+    if (typeof google !== "undefined" && google.maps?.places) {
+      autocompleteServiceRef.current = new google.maps.places.AutocompleteService();
+      placesServiceRef.current = new google.maps.places.PlacesService(document.createElement("div"));
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
+    script.async = true;
+    script.onload = () => {
+      autocompleteServiceRef.current = new google.maps.places.AutocompleteService();
+      placesServiceRef.current = new google.maps.places.PlacesService(document.createElement("div"));
+    };
+    document.head.appendChild(script);
+  }, []);
+
+  function handleCityInput(value: string) {
+    setCityInput(value);
+    if (regLocation) setRegLocation(null); // clear confirmed location on edit
+    if (!value.trim() || !autocompleteServiceRef.current) {
+      setCitySuggestions([]);
+      setCityDropdownOpen(false);
+      return;
+    }
+    void autocompleteServiceRef.current.getPlacePredictions(
+      { input: value, types: ["(cities)"] },
+      (predictions, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
+          setCitySuggestions(predictions);
+          setCityDropdownOpen(true);
+        } else {
+          setCitySuggestions([]);
+          setCityDropdownOpen(false);
+        }
+      }
+    );
+  }
+
+  function handleCitySelect(prediction: google.maps.places.AutocompletePrediction) {
+    if (!placesServiceRef.current) return;
+    placesServiceRef.current.getDetails(
+      { placeId: prediction.place_id, fields: ["address_components", "geometry", "name"] },
+      (place, status) => {
+        if (status !== google.maps.places.PlacesServiceStatus.OK || !place) return;
+        let city = "";
+        let state = "";
+        let country = "";
+        for (const comp of place.address_components ?? []) {
+          if (comp.types.includes("locality") || comp.types.includes("postal_town")) city = comp.long_name;
+          else if (comp.types.includes("administrative_area_level_1")) state = comp.long_name;
+          else if (comp.types.includes("country")) country = comp.long_name;
+        }
+        if (!city) city = place.name ?? prediction.structured_formatting.main_text;
+        const lat = place.geometry?.location?.lat() ?? 0;
+        const lng = place.geometry?.location?.lng() ?? 0;
+        const display = prediction.description;
+        setRegLocation({ display, city, state, country, latitude: lat, longitude: lng });
+        setCityInput(display);
+        setCitySuggestions([]);
+        setCityDropdownOpen(false);
+      }
+    );
+  }
+
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -617,7 +683,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
     reader.readAsDataURL(file);
   }
 
-  async function getCroppedImageDataUrl(imageSrc: string, pixelCrop: Area): Promise<string> {
+  async function getCroppedBlob(imageSrc: string, pixelCrop: Area): Promise<Blob> {
     const image = new window.Image();
     image.src = imageSrc;
     await new Promise<void>((resolve) => { image.onload = () => resolve(); });
@@ -626,14 +692,46 @@ const photoInputRef = useRef<HTMLInputElement>(null);
     canvas.height = 1000;
     const ctx = canvas.getContext("2d")!;
     ctx.drawImage(image, pixelCrop.x, pixelCrop.y, pixelCrop.width, pixelCrop.height, 0, 0, 600, 1000);
-    return canvas.toDataURL("image/jpeg", 0.9);
+    return new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("Canvas toBlob failed"));
+      }, "image/jpeg", 0.9);
+    });
   }
 
   async function confirmCrop() {
     if (!cropSrc || !croppedAreaPixels) return;
-    const dataUrl = await getCroppedImageDataUrl(cropSrc, croppedAreaPixels);
-    setRegForm((f) => ({ ...f, photoUrl: dataUrl }));
     setCropSrc(null);
+    setUploadingPhoto(true);
+    try {
+      const blob = await getCroppedBlob(cropSrc, croppedAreaPixels);
+      const token = localStorage.getItem("togeda_token");
+      const uuid = `WEB_${crypto.randomUUID()}`;
+
+      const formData = new FormData();
+      formData.append("file", blob, `${uuid}.jpeg`);
+      formData.append("bucketName", "togeda-profile-photos");
+      formData.append("keyName", uuid);
+
+      const res = await fetch("/api/upload/presign", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      });
+
+      if (!res.ok) {
+        setError("Photo upload failed. Please try again.");
+        return;
+      }
+
+      const { url } = (await res.json()) as { url: string };
+      setRegForm((f) => ({ ...f, photoUrl: url }));
+    } catch {
+      setError("Photo upload failed. Please try again.");
+    } finally {
+      setUploadingPhoto(false);
+    }
   }
 
   async function handleRegisterDetailsSubmit() {
@@ -647,15 +745,14 @@ const photoInputRef = useRef<HTMLInputElement>(null);
         return;
       }
 
-      const geo = await getUserLocation();
       const loc: Location = {
-        name: location?.name ?? "",
-        address: location?.address ?? "",
-        city: location?.city ?? "",
-        state: location?.state ?? "",
-        country: location?.country ?? "",
-        latitude: geo?.lat ?? location?.latitude ?? 0,
-        longitude: geo?.lon ?? location?.longitude ?? 0,
+        name: regLocation?.display ?? "",
+        address: "",
+        city: regLocation?.city ?? "",
+        state: regLocation?.state ?? "",
+        country: regLocation?.country ?? "",
+        latitude: regLocation?.latitude ?? 0,
+        longitude: regLocation?.longitude ?? 0,
       };
 
       const d = parseInt(regForm.day, 10);
@@ -1099,10 +1196,19 @@ const photoInputRef = useRef<HTMLInputElement>(null);
                 alt="Profile photo"
                 className="h-20 w-20 rounded-full object-cover ring-2 ring-white/10"
               />
+              {uploadingPhoto && (
+                <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50">
+                  <svg className="h-5 w-5 animate-spin text-white" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                </div>
+              )}
               <button
                 type="button"
                 onClick={() => photoInputRef.current?.click()}
-                className="absolute bottom-0 right-0 flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-md transition-transform hover:scale-110 active:scale-95"
+                disabled={uploadingPhoto}
+                className="absolute bottom-0 right-0 flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-md transition-transform hover:scale-110 active:scale-95 disabled:opacity-50"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5 text-stone-900">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
@@ -1245,6 +1351,40 @@ const photoInputRef = useRef<HTMLInputElement>(null);
           </div>
 
           <div>
+            <label className={labelCls}>City</label>
+            <div className="relative">
+              <input
+                ref={cityInputRef}
+                type="text"
+                value={cityInput}
+                onChange={(e) => handleCityInput(e.target.value)}
+                onBlur={() => setTimeout(() => setCityDropdownOpen(false), 150)}
+                onFocus={() => { if (citySuggestions.length > 0) setCityDropdownOpen(true); }}
+                placeholder="Search your city…"
+                autoComplete="off"
+                className={inputCls + (regLocation ? " ring-1 ring-green-500/50" : "")}
+              />
+              {cityDropdownOpen && citySuggestions.length > 0 && (
+                <ul className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-white/10 bg-stone-800 shadow-xl">
+                  {citySuggestions.map((p) => (
+                    <li key={p.place_id}>
+                      <button
+                        type="button"
+                        onMouseDown={() => handleCitySelect(p)}
+                        className="flex w-full flex-col px-4 py-2.5 text-left transition-colors hover:bg-white/8"
+                      >
+                        <span className="text-sm text-white">{p.structured_formatting.main_text}</span>
+                        <span className="text-xs text-stone-500">{p.structured_formatting.secondary_text}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {regErrors.city && <p className={errorCls}>{regErrors.city}</p>}
+          </div>
+
+          <div>
             <label className={labelCls}>Phone number <span className="text-stone-600">(optional)</span></label>
             <input
               type="tel"
@@ -1273,7 +1413,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
 
           <button
             onClick={() => void handleRegisterDetailsSubmit()}
-            disabled={loading}
+            disabled={loading || uploadingPhoto}
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-3 text-sm font-bold text-stone-900 hover:bg-stone-100 transition-colors disabled:opacity-50"
           >
             {loading && <div className="h-4 w-4 animate-spin rounded-full border-2 border-stone-400 border-t-stone-900" />}
@@ -1466,7 +1606,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
     >
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <div
-        className="relative z-10 w-full max-w-sm overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-stone-900 border border-white/10 shadow-2xl max-h-[90vh]"
+        className="relative z-10 w-full max-w-sm overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-stone-900 border border-white/10 shadow-2xl max-h-[90vh] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-600 [&::-webkit-scrollbar-thumb:hover]:bg-stone-500"
         onClick={(e) => e.stopPropagation()}
       >
         {renderContent()}

@@ -17,6 +17,7 @@ export const env = createEnv({
 
   client: {
     NEXT_PUBLIC_GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+    NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: z.string().min(1).optional(),
   },
 
   runtimeEnv: {
@@ -29,6 +30,7 @@ export const env = createEnv({
     COGNITO_SERVICE_PASSWORD: process.env.COGNITO_SERVICE_PASSWORD,
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
     NEXT_PUBLIC_GOOGLE_CLIENT_ID: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
+    NEXT_PUBLIC_GOOGLE_MAPS_API_KEY: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY,
   },
 
   skipValidation: !!process.env.SKIP_ENV_VALIDATION,
