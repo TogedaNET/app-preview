@@ -6,18 +6,19 @@ import { loadStripe } from "@stripe/stripe-js";
 import {
   Elements,
   PaymentElement,
+  ExpressCheckoutElement,
   useStripe,
   useElements,
 } from "@stripe/react-stripe-js";
+import type { StripeExpressCheckoutElementConfirmEvent } from "@stripe/stripe-js";
 import type { Currency } from "~/lib/api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface StripePaymentSheet {
-  paymentIntent: string; // PaymentIntent client secret
-  ephemeralKey: string;
-  customer: string;
+  clientSecret: string;
   publishableKey: string;
+  ownerStripeAccountId: string;
 }
 
 export interface PostFees {
@@ -79,8 +80,37 @@ function CheckoutForm({
     }
   }
 
+  async function handleExpressConfirm(event: StripeExpressCheckoutElementConfirmEvent) {
+    if (!stripe || !elements) return;
+
+    const { error: submitError } = await elements.submit();
+    if (submitError) {
+      setError(submitError.message ?? "Payment failed. Please try again.");
+      return;
+    }
+
+    const { error: confirmError } = await stripe.confirmPayment({
+      elements,
+      confirmParams: { return_url: window.location.href },
+      redirect: "if_required",
+    });
+
+    if (confirmError) {
+      setError(confirmError.message ?? "Payment failed. Please try again.");
+    } else {
+      onSuccess();
+    }
+  }
+
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+      <ExpressCheckoutElement
+        onConfirm={handleExpressConfirm}
+        options={{
+          buttonType: { applePay: "buy", googlePay: "buy" },
+          buttonTheme: { applePay: "white-outline", googlePay: "white" },
+        }}
+      />
       <div className="min-h-[200px]">
         <PaymentElement options={{ layout: "tabs" }} />
       </div>
@@ -179,8 +209,8 @@ export default function PaymentModal({
         }
 
         const sheet = (await sheetRes.json()) as StripePaymentSheet;
-        setStripePromise(loadStripe(sheet.publishableKey));
-        setClientSecret(sheet.paymentIntent);
+        setStripePromise(loadStripe(sheet.publishableKey, { stripeAccount: sheet.ownerStripeAccountId }));
+        setClientSecret(sheet.clientSecret);
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : "Something went wrong");
       } finally {
@@ -204,93 +234,99 @@ export default function PaymentModal({
 
       {/* Sheet */}
       <div
-        className="relative z-10 w-full max-w-md rounded-t-3xl sm:rounded-3xl bg-stone-900 border border-white/10 p-6 pb-10 sm:pb-6 shadow-2xl"
+        className="relative z-10 w-full max-w-md rounded-t-3xl sm:rounded-3xl bg-stone-900 border border-white/10 shadow-2xl flex flex-col max-h-[92dvh] sm:max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Drag handle (mobile) */}
-        <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
+        {/* Sticky header */}
+        <div className="shrink-0 px-6 pt-6 pb-0">
+          {/* Drag handle (mobile) */}
+          <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
 
-        {/* Close */}
-        <button
-          onClick={onClose}
-          className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-          </svg>
-        </button>
+          {/* Close */}
+          <button
+            onClick={onClose}
+            className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-colors"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
 
-        {/* Header */}
-        <div className="mb-6">
-          <h2 className="text-xl font-bold text-white">Complete your payment</h2>
-          <p className="mt-1 text-sm text-stone-400">Pay securely to join this event</p>
+          {/* Header */}
+          <div className="mb-6">
+            <h2 className="text-xl font-bold text-white">Complete your payment</h2>
+            <p className="mt-1 text-sm text-stone-400">Pay securely to join this event</p>
+          </div>
         </div>
 
-        {/* Fee breakdown */}
-        <div className="mb-5 rounded-2xl border border-white/10 bg-white/5 p-4">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-400">Order summary</p>
-          <div className="space-y-2">
-            <FeeRow label="Ticket" amount={fees?.ticketPrice ?? payment} symbol={symbol} />
-            {(() => {
-              const combinedFee = (fees?.serviceFee ?? 0) + (fees?.platformFee ?? 0);
-              return combinedFee > 0
-                ? <FeeRow label="Fee" amount={combinedFee} symbol={symbol} />
-                : null;
-            })()}
-            <div className="border-t border-white/10 pt-2 mt-2">
-              <FeeRow label="Total" amount={totalAmount} symbol={symbol} bold />
+        {/* Scrollable body */}
+        <div className="overflow-y-auto px-6 pb-10 sm:pb-6 flex-1 min-h-0">
+          {/* Fee breakdown */}
+          <div className="mb-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-400">Order summary</p>
+            <div className="space-y-2">
+              <FeeRow label="Ticket" amount={fees?.ticketPrice ?? payment} symbol={symbol} />
+              {(() => {
+                const combinedFee = (fees?.serviceFee ?? 0) + (fees?.platformFee ?? 0);
+                return combinedFee > 0
+                  ? <FeeRow label="Fee" amount={combinedFee} symbol={symbol} />
+                  : null;
+              })()}
+              <div className="border-t border-white/10 pt-2 mt-2">
+                <FeeRow label="Total" amount={totalAmount} symbol={symbol} bold />
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Stripe payment form */}
-        {isLoading && (
-          <div className="flex items-center justify-center py-10">
-            <svg className="h-8 w-8 animate-spin text-stone-400" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-          </div>
-        )}
+          {/* Stripe payment form */}
+          {isLoading && (
+            <div className="flex items-center justify-center py-10">
+              <svg className="h-8 w-8 animate-spin text-stone-400" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            </div>
+          )}
 
-        {loadError && (
-          <div className="rounded-xl bg-red-500/15 px-4 py-3 text-sm text-red-300 mb-4">
-            {loadError}
-          </div>
-        )}
+          {loadError && (
+            <div className="rounded-xl bg-red-500/15 px-4 py-3 text-sm text-red-300 mb-4">
+              {loadError}
+            </div>
+          )}
 
-        {!isLoading && !loadError && clientSecret && stripePromise && (
-          <Elements
-            stripe={stripePromise}
-            options={{
-              clientSecret,
-              appearance: {
-                theme: "night",
-                variables: {
-                  colorPrimary: "#ffffff",
-                  colorBackground: "#1c1917",
-                  colorText: "#e7e5e4",
-                  colorDanger: "#f87171",
-                  fontFamily: "inherit",
-                  borderRadius: "12px",
+          {!isLoading && !loadError && clientSecret && stripePromise && (
+            <Elements
+              stripe={stripePromise}
+              options={{
+                clientSecret,
+                appearance: {
+                  theme: "night",
+                  variables: {
+                    colorPrimary: "#ffffff",
+                    colorBackground: "#1c1917",
+                    colorText: "#e7e5e4",
+                    colorDanger: "#f87171",
+                    fontFamily: "inherit",
+                    borderRadius: "12px",
+                  },
                 },
-              },
-            }}
-          >
-            <CheckoutForm
-              totalAmount={totalAmount}
-              currencySymbol={symbol}
-              onSuccess={onSuccess}
-              onClose={onClose}
-            />
-          </Elements>
-        )}
+              }}
+            >
+              <CheckoutForm
+                totalAmount={totalAmount}
+                currencySymbol={symbol}
+                onSuccess={onSuccess}
+                onClose={onClose}
+              />
+            </Elements>
+          )}
 
-        {/* Stripe branding */}
-        <p className="mt-4 text-center text-xs text-stone-500">
-          Secured by{" "}
-          <span className="font-semibold text-stone-400">Stripe</span>
-        </p>
+          {/* Stripe branding */}
+          <p className="mt-4 text-center text-xs text-stone-500">
+            Secured by{" "}
+            <span className="font-semibold text-stone-400">Stripe</span>
+          </p>
+        </div>
       </div>
     </div>
   );
