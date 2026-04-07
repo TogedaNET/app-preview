@@ -155,7 +155,15 @@ export default function UserBadge() {
         </div>
       )}
       {showProfileModal && (
-        <AuthModal initialScreen="registerDetails" required onClose={() => setShowProfileModal(false)} />
+        <AuthModal
+          initialScreen="registerDetails"
+          required
+          onClose={() => setShowProfileModal(false)}
+          onProfileCreated={() => {
+            void fetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
+              .then(async (r) => { if (r.ok) setInfo(await r.json() as UserInfo); });
+          }}
+        />
       )}
     </div>
   );

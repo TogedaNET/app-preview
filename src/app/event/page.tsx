@@ -212,7 +212,7 @@ export default async function EventPage({
   const hasMap = loc.latitude !== 0 && loc.longitude !== 0;
 
   return (
-    <div className="relative min-h-screen text-white">
+    <div className="relative min-h-dvh text-white">
       <AppRedirect type="event" id={id} />
       {/* Blurred background from event image */}
       {heroImage && (

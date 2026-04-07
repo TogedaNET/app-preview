@@ -164,7 +164,7 @@ export default async function ClubPage({
   const hasMap = loc.latitude !== 0 && loc.longitude !== 0;
 
   return (
-    <div className="relative min-h-screen text-white">
+    <div className="relative min-h-dvh text-white">
       <AppRedirect type="club" id={id} />
       {/* Blurred background */}
       {heroImage && (

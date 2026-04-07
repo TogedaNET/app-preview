@@ -52,8 +52,8 @@ type Screen =
 interface Props {
   type?: "event" | "club";
   id?: string;
-  interests?: Interest[];
   onClose: () => void;
+  onProfileCreated?: () => void;
   initialScreen?: Screen;
   required?: boolean;
 }
@@ -191,8 +191,8 @@ const errorCls = "mt-1 text-xs text-red-400";
 export default function AuthModal({
   type,
   id,
-  interests,
   onClose,
+  onProfileCreated,
   initialScreen,
   required = false,
 }: Props) {
@@ -228,6 +228,8 @@ const photoInputRef = useRef<HTMLInputElement>(null);
   const [cityDropdownOpen, setCityDropdownOpen] = useState(false);
   const [regLocation, setRegLocation] = useState<{
     display: string;
+    name: string;
+    address: string;
     city: string;
     state: string;
     country: string;
@@ -237,6 +239,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
   const autocompleteServiceRef = useRef<google.maps.places.AutocompleteService | null>(null);
   const placesServiceRef = useRef<google.maps.places.PlacesService | null>(null);
   const cityInputRef = useRef<HTMLInputElement>(null);
+  const cityDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -295,15 +298,15 @@ const photoInputRef = useRef<HTMLInputElement>(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Close on Escape (disabled when required)
+  // Close on Escape (disabled when required or on profile setup screens)
   useEffect(() => {
-    if (required) return;
+    if (required || screen === "registerDetails" || screen === "googleProfile") return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose, required]);
+  }, [onClose, required, screen]);
 
   // Trigger Google profile check when that screen becomes active
   useEffect(() => {
@@ -612,8 +615,23 @@ const photoInputRef = useRef<HTMLInputElement>(null);
       placesServiceRef.current = new google.maps.places.PlacesService(document.createElement("div"));
       return;
     }
+    const existing = document.querySelector('script[src*="maps.googleapis.com"][src*="language=en"]');
+    if (existing) {
+      if (typeof google !== "undefined" && google.maps?.places) {
+        autocompleteServiceRef.current = new google.maps.places.AutocompleteService();
+        placesServiceRef.current = new google.maps.places.PlacesService(document.createElement("div"));
+      } else {
+        existing.addEventListener("load", () => {
+          autocompleteServiceRef.current = new google.maps.places.AutocompleteService();
+          placesServiceRef.current = new google.maps.places.PlacesService(document.createElement("div"));
+        });
+      }
+      return;
+    }
+    // Remove any old script without language=en
+    document.querySelectorAll('script[src*="maps.googleapis.com"]').forEach((s) => s.remove());
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&language=en`;
     script.async = true;
     script.onload = () => {
       autocompleteServiceRef.current = new google.maps.places.AutocompleteService();
@@ -622,32 +640,63 @@ const photoInputRef = useRef<HTMLInputElement>(null);
     document.head.appendChild(script);
   }, []);
 
+  // ── Auto-fill location from browser geolocation ──────────────────────────
+  useEffect(() => {
+    if (screen !== "registerDetails" && screen !== "googleProfile") return;
+    if (regLocation) return;
+    if (!navigator.geolocation) return;
+
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const { latitude, longitude } = pos.coords;
+      void fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&accept-language=en`,
+        { headers: { "User-Agent": "togeda-web-app" } }
+      )
+        .then((r) => r.json())
+        .then((data: { address?: { city?: string; town?: string; village?: string; state?: string; country?: string }; display_name?: string }) => {
+          const addr = data.address ?? {};
+          const city = addr.city ?? addr.town ?? addr.village ?? "";
+          const state = addr.state ?? "";
+          const country = addr.country ?? "";
+          if (!city) return;
+          const display = [city, state, country].filter(Boolean).join(", ");
+          setRegLocation({ display, name: city, address: display, city, state, country, latitude, longitude });
+          setCityInput(display);
+        });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
+
   function handleCityInput(value: string) {
     setCityInput(value);
-    if (regLocation) setRegLocation(null); // clear confirmed location on edit
-    if (!value.trim() || !autocompleteServiceRef.current) {
+    if (regLocation) setRegLocation(null);
+    if (cityDebounceRef.current) clearTimeout(cityDebounceRef.current);
+    if (!value.trim()) {
       setCitySuggestions([]);
       setCityDropdownOpen(false);
       return;
     }
-    void autocompleteServiceRef.current.getPlacePredictions(
-      { input: value, types: ["(cities)"] },
-      (predictions, status) => {
-        if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
-          setCitySuggestions(predictions);
-          setCityDropdownOpen(true);
-        } else {
-          setCitySuggestions([]);
-          setCityDropdownOpen(false);
+    cityDebounceRef.current = setTimeout(() => {
+      if (!autocompleteServiceRef.current) return;
+      void autocompleteServiceRef.current.getPlacePredictions(
+        { input: value, types: ["(cities)"] },
+        (predictions, status) => {
+          if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
+            setCitySuggestions(predictions.slice(0, 4));
+            setCityDropdownOpen(true);
+          } else {
+            setCitySuggestions([]);
+            setCityDropdownOpen(false);
+          }
         }
-      }
-    );
+      );
+    }, 500);
   }
 
   function handleCitySelect(prediction: google.maps.places.AutocompletePrediction) {
     if (!placesServiceRef.current) return;
     placesServiceRef.current.getDetails(
-      { placeId: prediction.place_id, fields: ["address_components", "geometry", "name"] },
+      { placeId: prediction.place_id, fields: ["address_components", "formatted_address", "geometry", "name"] },
       (place, status) => {
         if (status !== google.maps.places.PlacesServiceStatus.OK || !place) return;
         let city = "";
@@ -662,7 +711,9 @@ const photoInputRef = useRef<HTMLInputElement>(null);
         const lat = place.geometry?.location?.lat() ?? 0;
         const lng = place.geometry?.location?.lng() ?? 0;
         const display = prediction.description;
-        setRegLocation({ display, city, state, country, latitude: lat, longitude: lng });
+        const name = place.name ?? city;
+        const address = place.formatted_address ?? display;
+        setRegLocation({ display, name, address, city, state, country, latitude: lat, longitude: lng });
         setCityInput(display);
         setCitySuggestions([]);
         setCityDropdownOpen(false);
@@ -746,8 +797,8 @@ const photoInputRef = useRef<HTMLInputElement>(null);
       }
 
       const loc: Location = {
-        name: regLocation?.display ?? "",
-        address: "",
+        name: regLocation?.name ?? "",
+        address: regLocation?.address ?? "",
         city: regLocation?.city ?? "",
         state: regLocation?.state ?? "",
         country: regLocation?.country ?? "",
@@ -769,8 +820,16 @@ const photoInputRef = useRef<HTMLInputElement>(null);
         occupation: regForm.occupation.trim(),
         phoneNumber: regForm.phoneNumber.trim(),
         location: loc,
-        interests,
-        profilePhotos: regForm.photoUrl.trim() ? [regForm.photoUrl.trim()] : [],
+        interests: [
+          { name: "Networking", icon: "🗣️", category: "social" },
+          { name: "Events", icon: "📆", category: "social" },
+          { name: "Traveling", icon: "✈️", category: "hobby" },
+          { name: "Self-improvement", icon: "🗿", category: "hobby" },
+          { name: "Reading", icon: "🤓", category: "hobby" },
+        ],
+        profilePhotos: regForm.photoUrl.trim()
+          ? [regForm.photoUrl.trim()]
+          : ["https://togeda-profile-photos.s3.eu-central-1.amazonaws.com/ChatGPT+Image+26.03.2026+%D0%B3.%2C+21_44_25.png"],
         subToEmail: regForm.subToEmail,
         referralCodeUsed: regForm.referralCode.trim(),
       };
@@ -792,6 +851,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
 
       localStorage.setItem("togeda_display_name", regForm.firstName.trim());
       setToken(token);
+      onProfileCreated?.();
       await performJoin(token);
     } catch {
       setError("Network error. Please try again.");
@@ -1189,33 +1249,37 @@ const photoInputRef = useRef<HTMLInputElement>(null);
         <div className="flex flex-col gap-4">
           {/* Profile photo picker */}
           <div className="flex flex-col items-center gap-2">
-            <div className="relative">
+            <button
+              type="button"
+              onClick={() => !uploadingPhoto && photoInputRef.current?.click()}
+              disabled={uploadingPhoto}
+              className="group relative w-24 overflow-hidden rounded-xl ring-2 ring-white/10 transition-opacity hover:opacity-80 disabled:opacity-50"
+              style={{ aspectRatio: "9/12" }}
+            >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={regForm.photoUrl || "/default-profile-image.png"}
                 alt="Profile photo"
-                className="h-20 w-20 rounded-full object-cover ring-2 ring-white/10"
+                className="h-full w-full object-cover"
               />
-              {uploadingPhoto && (
-                <div className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50">
+              {uploadingPhoto ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/50">
                   <svg className="h-5 w-5 animate-spin text-white" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                   </svg>
                 </div>
+              ) : (
+                <div className="absolute inset-0 flex items-end justify-end p-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-md">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5 text-stone-900">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
+                    </svg>
+                  </div>
+                </div>
               )}
-              <button
-                type="button"
-                onClick={() => photoInputRef.current?.click()}
-                disabled={uploadingPhoto}
-                className="absolute bottom-0 right-0 flex h-6 w-6 items-center justify-center rounded-full bg-white shadow-md transition-transform hover:scale-110 active:scale-95 disabled:opacity-50"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5 text-stone-900">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
-                </svg>
-              </button>
-            </div>
+            </button>
             <p className="text-xs text-stone-500">
               Profile photo <span className="text-stone-600">(optional)</span>
             </p>
@@ -1339,18 +1403,6 @@ const photoInputRef = useRef<HTMLInputElement>(null);
           </div>
 
           <div>
-            <label className={labelCls}>Occupation</label>
-            <input
-              type="text"
-              value={regForm.occupation}
-              onChange={(e) => setRegForm((f) => ({ ...f, occupation: e.target.value }))}
-              placeholder="e.g. Software Engineer"
-              className={inputCls}
-            />
-            {regErrors.occupation && <p className={errorCls}>{regErrors.occupation}</p>}
-          </div>
-
-          <div>
             <label className={labelCls}>City</label>
             <div className="relative">
               <input
@@ -1361,7 +1413,10 @@ const photoInputRef = useRef<HTMLInputElement>(null);
                 onBlur={() => setTimeout(() => setCityDropdownOpen(false), 150)}
                 onFocus={() => { if (citySuggestions.length > 0) setCityDropdownOpen(true); }}
                 placeholder="Search your city…"
-                autoComplete="off"
+                autoComplete="new-password"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 className={inputCls + (regLocation ? " ring-1 ring-green-500/50" : "")}
               />
               {cityDropdownOpen && citySuggestions.length > 0 && (
@@ -1385,15 +1440,17 @@ const photoInputRef = useRef<HTMLInputElement>(null);
           </div>
 
           <div>
-            <label className={labelCls}>Phone number <span className="text-stone-600">(optional)</span></label>
+            <label className={labelCls}>Occupation</label>
             <input
-              type="tel"
-              value={regForm.phoneNumber}
-              onChange={(e) => setRegForm((f) => ({ ...f, phoneNumber: e.target.value }))}
-              placeholder="+1 555 000 0000"
+              type="text"
+              value={regForm.occupation}
+              onChange={(e) => setRegForm((f) => ({ ...f, occupation: e.target.value }))}
+              placeholder="e.g. Software Engineer"
               className={inputCls}
             />
+            {regErrors.occupation && <p className={errorCls}>{regErrors.occupation}</p>}
           </div>
+
 
           <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3">
             <div>
@@ -1602,7 +1659,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
   return createPortal(
     <div
       className="fixed inset-0 z-[9999] flex items-end justify-center sm:items-center"
-      onClick={required ? undefined : onClose}
+      onClick={(required || screen === "registerDetails" || screen === "googleProfile") ? undefined : onClose}
     >
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <div
