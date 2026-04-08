@@ -45,9 +45,7 @@ type Screen =
   | "registerDetails"
   | "verify"
   | "googleProfile"
-  | "joining"
-  | "success"
-  | "error";
+;
 
 interface Props {
   type?: "event" | "club";
@@ -126,37 +124,6 @@ function SpinnerIcon() {
   );
 }
 
-function CheckCircleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className="h-16 w-16">
-      <circle cx="12" cy="12" r="11" fill="#22c55e" opacity="0.2" />
-      <circle cx="12" cy="12" r="11" stroke="#22c55e" strokeWidth="1.5" />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        stroke="#22c55e"
-        d="m7.5 12 3 3 6-6"
-      />
-    </svg>
-  );
-}
-
-function ErrorCircleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className="h-16 w-16">
-      <circle cx="12" cy="12" r="11" fill="#ef4444" opacity="0.2" />
-      <circle cx="12" cy="12" r="11" stroke="#ef4444" strokeWidth="1.5" />
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        stroke="#ef4444"
-        d="M15 9l-6 6M9 9l6 6"
-      />
-    </svg>
-  );
-}
 
 function EnvelopeIcon() {
   return (
@@ -206,6 +173,9 @@ export default function AuthModal({
     onError: () => {
       setLoading(false);
       setError("Google sign-in failed. Please try again.");
+    },
+    onNonOAuthError: () => {
+      setLoading(false);
     },
   });
 
@@ -280,7 +250,6 @@ const photoInputRef = useRef<HTMLInputElement>(null);
 
   const [verifyCode, setVerifyCode] = useState("");
 
-  const [successType, setSuccessType] = useState<"joined" | "requested" | "already" | "ended">("joined");
 
   // Pre-fill email/password from localStorage when resuming a pending verification
   useEffect(() => {
@@ -300,7 +269,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
 
   // Close on Escape (disabled when required or on profile setup screens)
   useEffect(() => {
-    if (required || screen === "registerDetails" || screen === "googleProfile") return;
+    if (required || screen === "registerDetails" || screen === "googleProfile" || screen === "verify") return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
@@ -318,44 +287,6 @@ const photoInputRef = useRef<HTMLInputElement>(null);
 
   // ── Join action ──────────────────────────────────────────────────────────────
 
-  async function performJoin(token: string) {
-    if (!hasJoinContext) {
-      setSuccessType("joined");
-      setScreen("success");
-      return;
-    }
-    setScreen("joining");
-    try {
-      const res = await fetch("/api/join", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ type, id }),
-      });
-      if (res.ok) {
-        setSuccessType("joined");
-        setScreen("success");
-      } else if (res.status === 409) {
-        setSuccessType("already");
-        setScreen("success");
-      } else {
-        const d = (await res.json()) as { error?: string };
-        const msg = (d.error ?? "").toLowerCase();
-        if (msg.includes("started") || msg.includes("ended") || msg.includes("past") || msg.includes("expired")) {
-          setSuccessType("ended");
-          setScreen("success");
-        } else {
-          setError(d.error ?? "Failed to join");
-          setScreen("error");
-        }
-      }
-    } catch {
-      setError("Network error. Please try again.");
-      setScreen("error");
-    }
-  }
 
   // ── Google sign-in ───────────────────────────────────────────────────────────
 
@@ -387,7 +318,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
           // Profile complete — log in directly, no About You
           localStorage.setItem("togeda_display_name", profile.firstName);
           setToken(authToken);
-          await performJoin(authToken);
+          onClose();
         } else {
           // Profile exists but incomplete — show About You
           setLoading(false);
@@ -425,7 +356,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
         // Profile complete — log in and proceed
         localStorage.setItem("togeda_display_name", profile.firstName);
         setToken(token);
-        await performJoin(token);
+        onClose();
       } else {
         // Profile record exists but firstName not filled yet — show About You
         setLoading(false);
@@ -458,8 +389,20 @@ const photoInputRef = useRef<HTMLInputElement>(null);
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: loginEmail, password: loginPassword }),
       });
-      const data = (await res.json()) as { success?: boolean; token?: string; error?: string };
+      const data = (await res.json()) as { success?: boolean; token?: string; error?: string; code?: string };
       if (!res.ok) {
+        if (data.code === "UserNotConfirmedException") {
+          localStorage.setItem("togeda_pending_email", loginEmail);
+          setRegForm((f) => ({ ...f, email: loginEmail, password: loginPassword }));
+          setLoading(false);
+          void fetch("/api/auth/resend", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: loginEmail }),
+          });
+          setScreen("verify");
+          return;
+        }
         setError(data.error ?? "Login failed");
         setLoading(false);
         return;
@@ -475,7 +418,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
           // Profile complete — log in and proceed
           setDisplayName(profile.firstName);
           setToken(authToken);
-          await performJoin(authToken);
+          onClose();
         } else {
           // Profile exists but firstName not filled — show About You
           localStorage.setItem("togeda_token", authToken);
@@ -852,7 +795,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
       localStorage.setItem("togeda_display_name", regForm.firstName.trim());
       setToken(token);
       onProfileCreated?.();
-      await performJoin(token);
+      onClose();
     } catch {
       setError("Network error. Please try again.");
       setLoading(false);
@@ -899,7 +842,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
         const profile = (await meRes.json()) as { firstName?: string };
         if (profile.firstName) localStorage.setItem("togeda_display_name", profile.firstName);
         setToken(token);
-        await performJoin(token);
+        onClose();
       } else {
         // No profile yet — let them fill it in
         setLoading(false);
@@ -948,12 +891,6 @@ const photoInputRef = useRef<HTMLInputElement>(null);
           );
         }
         return RegisterDetailsScreen();
-      case "joining":
-        return JoiningScreen();
-      case "success":
-        return SuccessScreen();
-      case "error":
-        return ErrorScreen();
     }
   }
 
@@ -1485,16 +1422,14 @@ const photoInputRef = useRef<HTMLInputElement>(null);
     return (
       <div className="p-6 pb-8">
         <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
-        {required && (
-          <div className="mb-4 flex justify-end">
-            <button
-              onClick={() => { localStorage.removeItem("togeda_pending_email"); localStorage.removeItem("togeda_pending_password"); onClose(); }}
-              className="text-xs text-stone-500 hover:text-white transition-colors"
-            >
-              Log out
-            </button>
-          </div>
-        )}
+        <div className="mb-4 flex justify-end">
+          <button
+            onClick={() => { localStorage.removeItem("togeda_pending_email"); localStorage.removeItem("togeda_pending_password"); onClose(); }}
+            className="text-xs text-stone-500 hover:text-white transition-colors"
+          >
+            Log out
+          </button>
+        </div>
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
           <EnvelopeIcon />
           <div>
@@ -1543,67 +1478,6 @@ const photoInputRef = useRef<HTMLInputElement>(null);
     );
   }
 
-  function JoiningScreen() {
-    return (
-      <div className="flex flex-col items-center justify-center gap-4 p-10">
-        <SpinnerIcon />
-        <p className="text-sm text-stone-400">Joining…</p>
-      </div>
-    );
-  }
-
-  function SuccessScreen() {
-    const headline =
-      successType === "requested" ? "Request sent!" :
-      successType === "ended" ? "You're signed in!" :
-      "You're in!";
-    let subtext: string;
-    if (successType === "joined") {
-      subtext = `You've successfully joined this ${noun}.`;
-    } else if (successType === "requested") {
-      subtext = "Your join request has been sent. The host will review it.";
-    } else if (successType === "ended") {
-      subtext = `This ${noun} has already taken place, but your account is ready. Look out for upcoming events!`;
-    } else {
-      subtext = `You're already a member of this ${noun}.`;
-    }
-
-    return (
-      <div className="flex flex-col items-center gap-5 p-8 text-center">
-        <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
-        <CheckCircleIcon />
-        <div>
-          <h2 className="text-xl font-bold text-white">{headline}</h2>
-          <p className="mt-2 text-sm text-stone-400">{subtext}</p>
-        </div>
-        <button
-          onClick={onClose}
-          className="w-full rounded-xl bg-white py-3 text-sm font-bold text-stone-900 hover:bg-stone-100 transition-colors"
-        >
-          Done
-        </button>
-      </div>
-    );
-  }
-
-  function ErrorScreen() {
-    return (
-      <div className="flex flex-col items-center gap-5 p-8 text-center">
-        <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
-        <ErrorCircleIcon />
-        <div>
-          <h2 className="text-xl font-bold text-white">Something went wrong</h2>
-          <p className="mt-2 text-sm text-stone-400">{error}</p>
-        </div>
-        <button
-          onClick={() => { setError(""); setScreen("welcome"); }}
-          className="w-full rounded-xl bg-white py-3 text-sm font-bold text-stone-900 hover:bg-stone-100 transition-colors"
-        >
-          Try again
-        </button>
-      </div>
-    );
-  }
 
   if (cropSrc) {
     return createPortal(
@@ -1659,7 +1533,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
   return createPortal(
     <div
       className="fixed inset-0 z-[9999] flex items-end justify-center sm:items-center"
-      onClick={(required || screen === "registerDetails" || screen === "googleProfile") ? undefined : onClose}
+      onClick={(required || screen === "registerDetails" || screen === "googleProfile" || screen === "verify") ? undefined : onClose}
     >
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
       <div

@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import AuthModal from "./AuthModal";
 import PaymentModal from "./PaymentModal";
 import { useAuth } from "./AuthContext";
-import type { Currency, Interest, Location } from "~/lib/api";
+import type { Currency, EventStatus, ParticipantStatus, ParticipantRole } from "~/lib/api";
 
 const APP_STORE_URL = "https://apps.apple.com/bg/app/togeda-friends-activities/id6737203832";
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=net.togeda.app";
@@ -33,7 +34,7 @@ function PlusIcon() {
 
 // ── Store modal ────────────────────────────────────────────────────────────
 
-export function StoreModal({ type, onClose }: { type: "event" | "club"; onClose: () => void }) {
+export function StoreModal({ type, onClose, variant = "join" }: { type: "event" | "club"; onClose: () => void; variant?: "join" | "explore" }) {
   // Close on Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -42,6 +43,10 @@ export function StoreModal({ type, onClose }: { type: "event" | "club"; onClose:
   }, [onClose]);
 
   const noun = type === "event" ? "this event" : "this club";
+  const title = variant === "explore" ? "See more on Togeda" : "Open in Togeda";
+  const subtitle = variant === "explore"
+    ? "Download the free app for more information and full access to all features."
+    : `Download the free app to join ${noun}`;
 
   return createPortal(
     <div
@@ -73,9 +78,9 @@ export function StoreModal({ type, onClose }: { type: "event" | "club"; onClose:
         <div className="mb-5 flex flex-col items-center gap-3 text-center">
           <img src="/togeda-logo.png" alt="Togeda" className="h-16 w-16 rounded-2xl" />
           <div>
-            <p className="text-lg font-bold text-white">Open in Togeda</p>
+            <p className="text-lg font-bold text-white">{title}</p>
             <p className="mt-1 text-sm text-stone-400">
-              Download the free app to join {noun}
+              {subtitle}
             </p>
           </div>
         </div>
@@ -138,72 +143,56 @@ function buildDeepLink(type: "event" | "club", id: string, platform: Platform): 
 
 type JoinResult = "joined" | "requested" | "already" | "ended" | "error" | null;
 
-const JOINED_EVENTS_KEY = "togeda_joined_events";
-
-function getJoinedEvents(): string[] {
-  try {
-    return JSON.parse(localStorage.getItem(JOINED_EVENTS_KEY) ?? "[]") as string[];
-  } catch {
-    return [];
-  }
-}
-
-function markEventJoined(id: string) {
-  const joined = getJoinedEvents();
-  if (!joined.includes(id)) {
-    localStorage.setItem(JOINED_EVENTS_KEY, JSON.stringify([...joined, id]));
-  }
-}
-
 function useJoin(
   type: "event" | "club",
   id: string,
   platform: Platform,
   payment?: number,
 ) {
+  const router = useRouter();
   const { isAuthenticated, token } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [authInitialScreen, setAuthInitialScreen] = useState<"welcome" | "googleProfile">("welcome");
   const [joinResult, setJoinResult] = useState<JoinResult>(null);
-  const [isParticipant, setIsParticipant] = useState(false);
+  const [joining, setJoining] = useState(false);
+  const [userStatus, setUserStatus] = useState<ParticipantStatus | null>(null);
+  const [userRole, setUserRole] = useState<ParticipantRole | null>(null);
+  const [statusKey, setStatusKey] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Check localStorage for prior join, then verify with backend using user token
+  // Fetch the logged-in user's participation status and role
   useEffect(() => {
-    if (type !== "event") return;
-    if (isAuthenticated && token) {
-      // Always verify with backend when authenticated so stale localStorage
-      // from a previous account doesn't bleed into the current session.
-      fetch(`/api/event-status?postId=${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then((r) => r.json() as Promise<{ currentUserStatus?: string }>)
-        .then(({ currentUserStatus }) => {
-          if (currentUserStatus === "PARTICIPATING" || currentUserStatus === "OWNER") {
-            setIsParticipant(true);
-            markEventJoined(id);
-          } else {
-            setIsParticipant(false);
-          }
-        })
-        .catch(() => undefined);
-    } else {
-      // Not authenticated — fall back to localStorage only
-      setIsParticipant(getJoinedEvents().includes(id));
+    if (!isAuthenticated || !token) {
+      setUserStatus(null);
+      setUserRole(null);
+      return;
     }
-  }, [id, type, isAuthenticated, token]);
+    fetch(`/api/event-status?postId=${id}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.json() as Promise<{ currentUserStatus?: string; currentUserRole?: string }>)
+      .then((data) => {
+        setUserStatus((data.currentUserStatus as ParticipantStatus) ?? null);
+        setUserRole((data.currentUserRole as ParticipantRole) ?? null);
+      })
+      .catch(() => undefined);
+  }, [id, isAuthenticated, token, statusKey]);
+
+  const isParticipant = userStatus === "PARTICIPATING";
+  const isInQueue = userStatus === "IN_QUEUE";
+  const isHost = userRole === "HOST" || userRole === "CO_HOST";
 
   async function handleJoin() {
     if (platform === "desktop" || platform === "unknown") {
       if (isAuthenticated && token) {
         const isPaid = type === "event" && payment && payment > 0;
         if (isPaid) {
-          // Paid event → open payment modal
           setShowPaymentModal(true);
         } else {
-          // Free event → join directly
+          // Free event → call /posts/{id}/tryToJoinPost via proxy
+          setJoining(true);
           try {
             const res = await fetch("/api/join", {
               method: "POST",
@@ -213,18 +202,22 @@ function useJoin(
             const data = (await res.json()) as { success?: boolean; error?: string };
             if (data.success) {
               setJoinResult("joined");
-              if (type === "event") markEventJoined(id);
+              setStatusKey((k) => k + 1);
+              router.refresh();
             } else {
               const msg = (data.error ?? "").toLowerCase();
               if (msg.includes("already")) {
                 setJoinResult("already");
-                if (type === "event") markEventJoined(id);
+                setStatusKey((k) => k + 1);
+                router.refresh();
               } else if (msg.includes("request")) setJoinResult("requested");
               else if (["started", "ended", "past", "expired"].some((k) => msg.includes(k))) setJoinResult("ended");
               else setJoinResult("error");
             }
           } catch {
             setJoinResult("error");
+          } finally {
+            setJoining(false);
           }
         }
       } else {
@@ -248,10 +241,61 @@ function useJoin(
     }, 1800);
   }
 
+  const [leaving, setLeaving] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  async function handleCancel() {
+    if (!token) return;
+    setCancelling(true);
+    try {
+      const res = await fetch("/api/cancel-join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id }),
+      });
+      const data = (await res.json()) as { success?: boolean; error?: string };
+      if (data.success) {
+        setJoinResult(null);
+        setStatusKey((k) => k + 1);
+        router.refresh();
+      } else {
+        setJoinResult("error");
+      }
+    } catch {
+      setJoinResult("error");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function handleLeave() {
+    if (!token) return;
+    setLeaving(true);
+    try {
+      const res = await fetch("/api/leave", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ type, id }),
+      });
+      const data = (await res.json()) as { success?: boolean; error?: string };
+      if (data.success) {
+        setJoinResult(null);
+        setStatusKey((k) => k + 1);
+        router.refresh();
+      } else {
+        setJoinResult("error");
+      }
+    } catch {
+      setJoinResult("error");
+    } finally {
+      setLeaving(false);
+    }
+  }
+
   function handlePaymentSuccess() {
     setShowPaymentModal(false);
-    setIsParticipant(true);
-    if (type === "event") markEventJoined(id);
+    setStatusKey((k) => k + 1);
+    router.refresh();
   }
 
   return {
@@ -261,7 +305,14 @@ function useJoin(
     authInitialScreen, setAuthInitialScreen,
     joinResult, setJoinResult,
     isParticipant,
+    isInQueue,
+    isHost,
+    joining,
+    leaving,
+    cancelling,
     handleJoin,
+    handleLeave,
+    handleCancel,
     handlePaymentSuccess,
   };
 }
@@ -272,10 +323,10 @@ interface Props {
   type: "event" | "club";
   id: string;
   count?: number;
-  interests?: Interest[];
-  location?: Location;
   payment?: number;
   currency?: Currency;
+  status?: EventStatus;
+  askToJoin?: boolean;
 }
 
 function joinResultMessage(result: JoinResult, type: "event" | "club"): string {
@@ -286,7 +337,7 @@ function joinResultMessage(result: JoinResult, type: "event" | "club"): string {
   return "Something went wrong. Please try again.";
 }
 
-export default function JoinCTA({ type, id, count, interests, location, payment, currency }: Props) {
+export default function JoinCTA({ type, id, count, payment, currency, status, askToJoin: _askToJoin }: Props) {
   const { token } = useAuth();
   const [platform, setPlatform] = useState<Platform>("unknown");
   useEffect(() => setPlatform(detectPlatform()), []);
@@ -296,6 +347,8 @@ export default function JoinCTA({ type, id, count, interests, location, payment,
     ? `Join Event · ${currency?.symbol ?? ""}${payment}`
     : type === "event" ? "Join Event" : "Join Club";
 
+  const hasEnded = type === "event" && status === "HAS_ENDED";
+
   const {
     showModal, setShowModal,
     showAuthModal, setShowAuthModal,
@@ -303,9 +356,18 @@ export default function JoinCTA({ type, id, count, interests, location, payment,
     authInitialScreen, setAuthInitialScreen,
     joinResult, setJoinResult,
     isParticipant,
+    isInQueue,
+    isHost,
+    joining,
+    leaving,
+    cancelling,
     handleJoin,
+    handleLeave,
+    handleCancel,
     handlePaymentSuccess,
   } = useJoin(type, id, platform, payment);
+
+  const canLeave = isParticipant && !isPaidEvent && status === "NOT_STARTED";
 
   useEffect(() => {
     const flag = localStorage.getItem("togeda_google_auth_complete");
@@ -316,22 +378,62 @@ export default function JoinCTA({ type, id, count, interests, location, payment,
     }
   }, [setShowAuthModal, setAuthInitialScreen]);
 
-  const defaultLocation: Location = location ?? {
-    name: "",
-    address: "",
-    city: "",
-    state: "",
-    country: "",
-    latitude: 0,
-    longitude: 0,
-  };
-
   if (platform === "unknown") return null;
 
   return (
     <>
       <div className="flex flex-col gap-3">
-        {isParticipant || joinResult === "joined" ? (
+        {isHost ? (
+          <div className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-500/20 border border-amber-500/30 py-4 text-base font-bold text-amber-300">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5 shrink-0">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z" />
+            </svg>
+            {"You're the host of this event"}
+          </div>
+        ) : hasEnded ? (
+          <div className="flex w-full items-center justify-center gap-2 rounded-2xl bg-red-500/20 border border-red-500/30 py-4 text-base font-bold text-red-300">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-5 w-5 shrink-0">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+            </svg>
+            Event Has Ended
+          </div>
+        ) : canLeave ? (
+          <button
+            onClick={handleLeave}
+            disabled={leaving}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-red-500/20 border border-red-500/30 py-4 text-base font-bold text-red-300 transition-all hover:bg-red-500/30 active:scale-[0.98] disabled:opacity-60"
+          >
+            {leaving ? (
+              <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-5 w-5 shrink-0">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3-3h-9m0 0 3-3m-3 3 3 3" />
+              </svg>
+            )}
+            {leaving ? "Leaving..." : "Leave Event"}
+          </button>
+        ) : isInQueue ? (
+          <button
+            onClick={handleCancel}
+            disabled={cancelling}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-500/20 border border-amber-500/30 py-4 text-base font-bold text-amber-300 transition-all hover:bg-amber-500/30 active:scale-[0.98] disabled:opacity-60"
+          >
+            {cancelling ? (
+              <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-5 w-5 shrink-0">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            )}
+            {cancelling ? "Cancelling..." : "Cancel Request"}
+          </button>
+        ) : isParticipant || joinResult === "joined" ? (
           <div className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 py-4 text-base font-bold text-emerald-300">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-5 w-5 shrink-0">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
@@ -341,10 +443,18 @@ export default function JoinCTA({ type, id, count, interests, location, payment,
         ) : (
           <button
             onClick={handleJoin}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white py-4 text-base font-bold text-stone-900 shadow-lg transition-all active:scale-[0.98] hover:bg-stone-100"
+            disabled={joining}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white py-4 text-base font-bold text-stone-900 shadow-lg transition-all active:scale-[0.98] hover:bg-stone-100 disabled:opacity-60"
           >
-            <PlusIcon />
-            {label}
+            {joining ? (
+              <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            ) : (
+              <PlusIcon />
+            )}
+            {joining ? "Joining..." : label}
           </button>
         )}
         {joinResult && joinResult !== "joined" && (
@@ -364,10 +474,6 @@ export default function JoinCTA({ type, id, count, interests, location, payment,
       {showModal && <StoreModal type={type} onClose={() => setShowModal(false)} />}
       {showAuthModal && (
         <AuthModal
-          type={type}
-          id={id}
-          interests={interests ?? []}
-          location={defaultLocation}
           onClose={() => setShowAuthModal(false)}
           initialScreen={authInitialScreen}
         />
@@ -388,7 +494,7 @@ export default function JoinCTA({ type, id, count, interests, location, payment,
 
 // ── StickyJoinBar (fixed bottom, mobile only) ────────────────────────────
 
-export function StickyJoinBar({ type, id, count, interests, location, payment, currency }: Props) {
+export function StickyJoinBar({ type, id, count, payment, currency, status, askToJoin: _askToJoin }: Props) {
   const { token } = useAuth();
   const [platform, setPlatform] = useState<Platform>("unknown");
   useEffect(() => setPlatform(detectPlatform()), []);
@@ -398,6 +504,7 @@ export function StickyJoinBar({ type, id, count, interests, location, payment, c
     ? `Join · ${currency?.symbol ?? ""}${payment}`
     : type === "event" ? "Join Event" : "Join Club";
   const isMobile = platform === "ios" || platform === "android";
+  const hasEnded = type === "event" && status === "HAS_ENDED";
   const {
     showModal, setShowModal,
     showAuthModal, setShowAuthModal,
@@ -405,9 +512,18 @@ export function StickyJoinBar({ type, id, count, interests, location, payment, c
     authInitialScreen, setAuthInitialScreen,
     joinResult, setJoinResult,
     isParticipant,
+    isInQueue,
+    isHost,
+    joining,
+    leaving,
+    cancelling,
     handleJoin,
+    handleLeave,
+    handleCancel,
     handlePaymentSuccess,
   } = useJoin(type, id, platform, payment);
+
+  const canLeave = isParticipant && !isPaidEvent && status === "NOT_STARTED";
 
   useEffect(() => {
     const flag = localStorage.getItem("togeda_google_auth_complete");
@@ -417,16 +533,6 @@ export function StickyJoinBar({ type, id, count, interests, location, payment, c
       setAuthInitialScreen("googleProfile");
     }
   }, [setShowAuthModal, setAuthInitialScreen]);
-
-  const defaultLocation: Location = location ?? {
-    name: "",
-    address: "",
-    city: "",
-    state: "",
-    country: "",
-    latitude: 0,
-    longitude: 0,
-  };
 
   if (!isMobile) return null;
 
@@ -445,20 +551,80 @@ export function StickyJoinBar({ type, id, count, interests, location, payment, c
             )}
             <span className="text-xs text-stone-500">Open in Togeda app</span>
           </div>
-          {alreadyJoined ? (
-            <div className="ml-auto flex shrink-0 items-center gap-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 px-6 py-3 text-sm font-bold text-emerald-300">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4 shrink-0">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          {isHost ? (
+            <div className="ml-auto flex shrink-0 items-center gap-2 rounded-xl bg-amber-500/20 border border-amber-500/30 px-6 py-3 text-sm font-bold text-amber-300">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4 shrink-0">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z" />
               </svg>
-              {type === "event" ? "You're going!" : "Joined!"}
+              {"You're the host"}
             </div>
+          ) : hasEnded ? (
+            <div className="ml-auto flex shrink-0 items-center gap-2 rounded-xl bg-red-500/20 border border-red-500/30 px-6 py-3 text-sm font-bold text-red-300">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4 shrink-0">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+              </svg>
+              Event Has Ended
+            </div>
+          ) : alreadyJoined ? (
+            canLeave ? (
+              <button
+                onClick={handleLeave}
+                disabled={leaving}
+                className="ml-auto flex shrink-0 items-center gap-2 rounded-xl border border-red-500/30 px-6 py-3 text-sm font-semibold text-red-400 transition-all hover:bg-red-500/10 active:scale-95 disabled:opacity-60"
+              >
+                {leaving ? (
+                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4 shrink-0">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3-3h-9m0 0 3-3m-3 3 3 3" />
+                  </svg>
+                )}
+                {leaving ? "Leaving..." : "Leave"}
+              </button>
+            ) : (
+              <div className="ml-auto flex shrink-0 items-center gap-2 rounded-xl bg-emerald-500/20 border border-emerald-500/30 px-6 py-3 text-sm font-bold text-emerald-300">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4 shrink-0">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+                {type === "event" ? "You're going!" : "Joined!"}
+              </div>
+            )
+          ) : isInQueue ? (
+            <button
+              onClick={handleCancel}
+              disabled={cancelling}
+              className="ml-auto flex shrink-0 items-center gap-2 rounded-xl bg-amber-500/20 border border-amber-500/30 px-6 py-3 text-sm font-bold text-amber-300 transition-all hover:bg-amber-500/30 active:scale-95 disabled:opacity-60"
+            >
+              {cancelling ? (
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4 shrink-0">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              )}
+              {cancelling ? "Cancelling..." : "Cancel"}
+            </button>
           ) : (
             <button
               onClick={handleJoin}
-              className="ml-auto flex shrink-0 items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-bold text-stone-900 transition-transform active:scale-95"
+              disabled={joining}
+              className="ml-auto flex shrink-0 items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-bold text-stone-900 transition-transform active:scale-95 disabled:opacity-60"
             >
-              <PlusIcon />
-              {label}
+              {joining ? (
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <PlusIcon />
+              )}
+              {joining ? "Joining..." : label}
             </button>
           )}
         </div>
@@ -475,10 +641,6 @@ export function StickyJoinBar({ type, id, count, interests, location, payment, c
       {showModal && <StoreModal type={type} onClose={() => setShowModal(false)} />}
       {showAuthModal && (
         <AuthModal
-          type={type}
-          id={id}
-          interests={interests ?? []}
-          location={defaultLocation}
           onClose={() => setShowAuthModal(false)}
           initialScreen={authInitialScreen}
         />

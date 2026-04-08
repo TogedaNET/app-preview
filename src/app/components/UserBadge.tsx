@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "./AuthContext";
 import AuthModal from "./AuthModal";
 
@@ -25,24 +25,41 @@ export default function UserBadge() {
   const ref = useRef<HTMLDivElement>(null);
   const hasAutoOpenedModal = useRef(false);
 
-  // Case 1: logged in but profile incomplete → open registerDetails
-  useEffect(() => {
-    if (!isAuthenticated || !token || hasAutoOpenedModal.current) return;
+  const fetchInfo = useCallback(() => {
+    if (!token) return;
     void fetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
       .then(async (r) => {
         if (r.ok) {
           const d = (await r.json()) as UserInfo;
+          setInfo(d);
+        }
+      })
+      .catch(() => undefined);
+  }, [token]);
+
+  // Fetch info + conditionally open profile modal when token becomes available
+  useEffect(() => {
+    if (!isAuthenticated || !token) {
+      // Reset on logout
+      hasAutoOpenedModal.current = false;
+      setInfo(null);
+      return;
+    }
+    void fetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (r) => {
+        if (r.ok) {
+          const d = (await r.json()) as UserInfo;
+          const isDeleted = d.email === "deletedEmail" && d.firstName === "Deleted" && d.lastName === "user";
+          if (isDeleted) { logout(); return; }
           setInfo(d);
           if (!d.firstName && !hasAutoOpenedModal.current) {
             hasAutoOpenedModal.current = true;
             setShowProfileModal(true);
           }
         } else if (r.status === 404 && !hasAutoOpenedModal.current) {
-          // Genuinely no profile — show About You
           hasAutoOpenedModal.current = true;
           setShowProfileModal(true);
         }
-        // Ignore transient errors (5xx, network) — don't spam the modal
       })
       .catch(() => undefined);
   }, [isAuthenticated, token]);
@@ -71,12 +88,19 @@ export default function UserBadge() {
       <>
         <button
           onClick={() => setShowAuth(true)}
-          className="fixed right-4 top-4 z-[9998] rounded-full bg-white px-4 py-2 text-sm font-semibold text-stone-900 shadow-lg transition-all hover:bg-stone-100 active:scale-95"
+          className="fixed right-4 top-4 z-9998 rounded-full bg-white px-4 py-2 text-sm font-semibold text-stone-900 shadow-lg transition-all hover:bg-stone-100 active:scale-95"
         >
           Log in
         </button>
-        {showAuth && <AuthModal onClose={() => setShowAuth(false)} />}
-        {showVerifyModal && <AuthModal initialScreen="verify" required onClose={() => setShowVerifyModal(false)} />}
+        {showAuth && <AuthModal onClose={() => setShowAuth(false)} onProfileCreated={fetchInfo} />}
+        {showVerifyModal && (
+          <AuthModal
+            initialScreen="verify"
+            required
+            onClose={() => setShowVerifyModal(false)}
+            onProfileCreated={fetchInfo}
+          />
+        )}
       </>
     );
   }
@@ -87,7 +111,7 @@ export default function UserBadge() {
   const initial = (info?.firstName ?? user.email).charAt(0).toUpperCase();
 
   return (
-    <div ref={ref} className="fixed right-4 top-4 z-[9998]">
+    <div ref={ref} className="fixed right-4 top-4 z-9998">
       {/* Avatar button */}
       <button
         onClick={() => setOpen((v) => !v)}
@@ -159,10 +183,7 @@ export default function UserBadge() {
           initialScreen="registerDetails"
           required
           onClose={() => setShowProfileModal(false)}
-          onProfileCreated={() => {
-            void fetch("/api/auth/me", { headers: { Authorization: `Bearer ${token}` } })
-              .then(async (r) => { if (r.ok) setInfo(await r.json() as UserInfo); });
-          }}
+          onProfileCreated={fetchInfo}
         />
       )}
     </div>
