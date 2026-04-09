@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import AuthModal from "./AuthModal";
 import PaymentModal from "./PaymentModal";
 import { useAuth } from "./AuthContext";
-import type { Currency, EventStatus, ParticipantStatus, ParticipantRole } from "~/lib/api";
+import type { Currency, EventStatus, ParticipantStatus, ParticipantRole, ArrivalStatus } from "~/lib/api";
 
 const APP_STORE_URL = "https://apps.apple.com/bg/app/togeda-friends-activities/id6737203832";
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=net.togeda.app";
@@ -143,11 +143,23 @@ function buildDeepLink(type: "event" | "club", id: string, platform: Platform): 
 
 type JoinResult = "joined" | "requested" | "already" | "ended" | "error" | null;
 
+function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function useJoin(
   type: "event" | "club",
   id: string,
   platform: Platform,
   payment?: number,
+  askToJoin?: boolean,
+  eventLat?: number,
+  eventLon?: number,
 ) {
   const router = useRouter();
   const { isAuthenticated, token } = useAuth();
@@ -159,6 +171,10 @@ function useJoin(
   const [joining, setJoining] = useState(false);
   const [userStatus, setUserStatus] = useState<ParticipantStatus | null>(null);
   const [userRole, setUserRole] = useState<ParticipantRole | null>(null);
+  const [userArrivalStatus, setUserArrivalStatus] = useState<ArrivalStatus | null>(null);
+  const [confirmingLocation, setConfirmingLocation] = useState(false);
+  const [locationFeedback, setLocationFeedback] = useState<{ meters: number; visible: boolean } | null>(null);
+  const locationFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [statusKey, setStatusKey] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -172,10 +188,11 @@ function useJoin(
     fetch(`/api/event-status?postId=${id}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then((r) => r.json() as Promise<{ currentUserStatus?: string; currentUserRole?: string }>)
+      .then((r) => r.json() as Promise<{ currentUserStatus?: string; currentUserRole?: string; currentUserArrivalStatus?: string }>)
       .then((data) => {
         setUserStatus((data.currentUserStatus as ParticipantStatus) ?? null);
         setUserRole((data.currentUserRole as ParticipantRole) ?? null);
+        setUserArrivalStatus((data.currentUserArrivalStatus as ArrivalStatus) ?? null);
       })
       .catch(() => undefined);
   }, [id, isAuthenticated, token, statusKey]);
@@ -201,7 +218,7 @@ function useJoin(
             });
             const data = (await res.json()) as { success?: boolean; error?: string };
             if (data.success) {
-              setJoinResult("joined");
+              setJoinResult(askToJoin ? "requested" : "joined");
               setStatusKey((k) => k + 1);
               router.refresh();
             } else {
@@ -298,6 +315,47 @@ function useJoin(
     router.refresh();
   }
 
+  async function handleConfirmLocation() {
+    if (!token || eventLat === undefined || eventLon === undefined) return;
+    setConfirmingLocation(true);
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000 })
+      );
+      const meters = haversineMeters(pos.coords.latitude, pos.coords.longitude, eventLat, eventLon);
+      if (meters <= 50) {
+        // Show distance briefly even on success, then confirm
+        setLocationFeedback({ meters: Math.round(meters), visible: true });
+        locationFeedbackTimer.current = setTimeout(() => {
+          setLocationFeedback((f) => f ? { ...f, visible: false } : f);
+          setTimeout(() => setLocationFeedback(null), 400);
+        }, 2000);
+        const res = await fetch("/api/confirm-arrival", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ postId: id }),
+        });
+        const data = (await res.json()) as { success?: boolean };
+        if (data.success) {
+          setStatusKey((k) => k + 1);
+          router.refresh();
+        }
+      } else {
+        // Too far — show distance feedback with fade-out after 2s
+        setLocationFeedback({ meters: Math.round(meters), visible: true });
+        if (locationFeedbackTimer.current) clearTimeout(locationFeedbackTimer.current);
+        locationFeedbackTimer.current = setTimeout(() => {
+          setLocationFeedback((f) => f ? { ...f, visible: false } : f);
+          setTimeout(() => setLocationFeedback(null), 400);
+        }, 2000);
+      }
+    } catch {
+      // Geolocation denied or timed out — nothing to show
+    } finally {
+      setConfirmingLocation(false);
+    }
+  }
+
   return {
     showModal, setShowModal,
     showAuthModal, setShowAuthModal,
@@ -307,6 +365,9 @@ function useJoin(
     isParticipant,
     isInQueue,
     isHost,
+    userArrivalStatus,
+    confirmingLocation,
+    locationFeedback,
     joining,
     leaving,
     cancelling,
@@ -314,6 +375,7 @@ function useJoin(
     handleLeave,
     handleCancel,
     handlePaymentSuccess,
+    handleConfirmLocation,
   };
 }
 
@@ -323,10 +385,15 @@ interface Props {
   type: "event" | "club";
   id: string;
   count?: number;
+  maximumPeople?: number;
   payment?: number;
   currency?: Currency;
   status?: EventStatus;
   askToJoin?: boolean;
+  allowedJoinAfterStart?: boolean;
+  needsLocationalConfirmation?: boolean;
+  eventLat?: number;
+  eventLon?: number;
 }
 
 function joinResultMessage(result: JoinResult, type: "event" | "club"): string {
@@ -337,7 +404,7 @@ function joinResultMessage(result: JoinResult, type: "event" | "club"): string {
   return "Something went wrong. Please try again.";
 }
 
-export default function JoinCTA({ type, id, count, payment, currency, status, askToJoin: _askToJoin }: Props) {
+export default function JoinCTA({ type, id, count, maximumPeople, payment, currency, status, askToJoin: _askToJoin, allowedJoinAfterStart, needsLocationalConfirmation, eventLat, eventLon }: Props) {
   const { token } = useAuth();
   const [platform, setPlatform] = useState<Platform>("unknown");
   useEffect(() => setPlatform(detectPlatform()), []);
@@ -346,6 +413,8 @@ export default function JoinCTA({ type, id, count, payment, currency, status, as
   const label = isPaidEvent
     ? `Join Event · ${currency?.symbol ?? ""}${payment}`
     : type === "event" ? "Join Event" : "Join Club";
+  const hasStartedAndClosed = type === "event" && status === "HAS_STARTED" && allowedJoinAfterStart === false;
+  const isFull = type === "event" && !!maximumPeople && maximumPeople > 0 && (count ?? 0) >= maximumPeople;
 
   const hasEnded = type === "event" && status === "HAS_ENDED";
 
@@ -358,6 +427,9 @@ export default function JoinCTA({ type, id, count, payment, currency, status, as
     isParticipant,
     isInQueue,
     isHost,
+    userArrivalStatus,
+    confirmingLocation,
+    locationFeedback,
     joining,
     leaving,
     cancelling,
@@ -365,9 +437,11 @@ export default function JoinCTA({ type, id, count, payment, currency, status, as
     handleLeave,
     handleCancel,
     handlePaymentSuccess,
-  } = useJoin(type, id, platform, payment);
+    handleConfirmLocation,
+  } = useJoin(type, id, platform, payment, _askToJoin, eventLat, eventLon);
 
   const canLeave = isParticipant && !isPaidEvent && status === "NOT_STARTED";
+  const needsLocationConfirm = isParticipant && !!needsLocationalConfirmation && userArrivalStatus !== "ARRIVED" && status === "HAS_STARTED";
 
   useEffect(() => {
     const flag = localStorage.getItem("togeda_google_auth_complete");
@@ -397,6 +471,20 @@ export default function JoinCTA({ type, id, count, payment, currency, status, as
             </svg>
             Event Has Ended
           </div>
+        ) : hasStartedAndClosed && !isParticipant && !isInQueue ? (
+          <div className="flex w-full items-center justify-center gap-2 rounded-2xl bg-stone-500/20 border border-stone-500/30 py-4 text-base font-bold text-stone-300">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-5 w-5 shrink-0">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+            </svg>
+            Event Has Started · Joining Closed
+          </div>
+        ) : isFull && !isParticipant && !isInQueue ? (
+          <div className="flex w-full items-center justify-center gap-2 rounded-2xl bg-stone-500/20 border border-stone-500/30 py-4 text-base font-bold text-stone-300">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-5 w-5 shrink-0">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
+            </svg>
+            Event Is Full
+          </div>
         ) : canLeave ? (
           <button
             onClick={handleLeave}
@@ -415,7 +503,7 @@ export default function JoinCTA({ type, id, count, payment, currency, status, as
             )}
             {leaving ? "Leaving..." : "Leave Event"}
           </button>
-        ) : isInQueue ? (
+        ) : (isInQueue || joinResult === "requested") ? (
           <button
             onClick={handleCancel}
             disabled={cancelling}
@@ -433,6 +521,35 @@ export default function JoinCTA({ type, id, count, payment, currency, status, as
             )}
             {cancelling ? "Cancelling..." : "Cancel Request"}
           </button>
+        ) : needsLocationConfirm ? (
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={handleConfirmLocation}
+              disabled={confirmingLocation}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-500/20 border border-blue-500/30 py-4 text-base font-bold text-blue-300 transition-all hover:bg-blue-500/30 active:scale-[0.98] disabled:opacity-60"
+            >
+              {confirmingLocation ? (
+                <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-5 w-5 shrink-0">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
+                </svg>
+              )}
+              {confirmingLocation ? "Locating..." : "Confirm Location"}
+            </button>
+            {locationFeedback && (
+              <p
+                className="text-center text-sm font-medium text-red-300 transition-opacity duration-400"
+                style={{ opacity: locationFeedback.visible ? 1 : 0 }}
+              >
+                You are {locationFeedback.meters}m away · must be within 50m
+              </p>
+            )}
+          </div>
         ) : isParticipant || joinResult === "joined" ? (
           <div className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 py-4 text-base font-bold text-emerald-300">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-5 w-5 shrink-0">
@@ -457,7 +574,7 @@ export default function JoinCTA({ type, id, count, payment, currency, status, as
             {joining ? "Joining..." : label}
           </button>
         )}
-        {joinResult && joinResult !== "joined" && (
+        {joinResult && joinResult !== "joined" && joinResult !== "requested" && (
           <div className={`rounded-xl px-4 py-3 text-sm text-center font-medium ${joinResult === "error" ? "bg-red-500/15 text-red-300" : "bg-white/10 text-white"}`}>
             {joinResultMessage(joinResult, type)}
             <button onClick={() => setJoinResult(null)} className="ml-2 text-xs opacity-60 hover:opacity-100">✕</button>
@@ -494,7 +611,7 @@ export default function JoinCTA({ type, id, count, payment, currency, status, as
 
 // ── StickyJoinBar (fixed bottom, mobile only) ────────────────────────────
 
-export function StickyJoinBar({ type, id, count, payment, currency, status, askToJoin: _askToJoin }: Props) {
+export function StickyJoinBar({ type, id, count, maximumPeople, payment, currency, status, askToJoin: _askToJoin, allowedJoinAfterStart, needsLocationalConfirmation, eventLat, eventLon }: Props) {
   const { token } = useAuth();
   const [platform, setPlatform] = useState<Platform>("unknown");
   useEffect(() => setPlatform(detectPlatform()), []);
@@ -505,6 +622,8 @@ export function StickyJoinBar({ type, id, count, payment, currency, status, askT
     : type === "event" ? "Join Event" : "Join Club";
   const isMobile = platform === "ios" || platform === "android";
   const hasEnded = type === "event" && status === "HAS_ENDED";
+  const hasStartedAndClosed = type === "event" && status === "HAS_STARTED" && allowedJoinAfterStart === false;
+  const isFull = type === "event" && !!maximumPeople && maximumPeople > 0 && (count ?? 0) >= maximumPeople;
   const {
     showModal, setShowModal,
     showAuthModal, setShowAuthModal,
@@ -514,6 +633,9 @@ export function StickyJoinBar({ type, id, count, payment, currency, status, askT
     isParticipant,
     isInQueue,
     isHost,
+    userArrivalStatus,
+    confirmingLocation,
+    locationFeedback,
     joining,
     leaving,
     cancelling,
@@ -521,9 +643,11 @@ export function StickyJoinBar({ type, id, count, payment, currency, status, askT
     handleLeave,
     handleCancel,
     handlePaymentSuccess,
-  } = useJoin(type, id, platform, payment);
+    handleConfirmLocation,
+  } = useJoin(type, id, platform, payment, _askToJoin, eventLat, eventLon);
 
   const canLeave = isParticipant && !isPaidEvent && status === "NOT_STARTED";
+  const needsLocationConfirm = isParticipant && !!needsLocationalConfirmation && userArrivalStatus !== "ARRIVED" && status === "HAS_STARTED";
 
   useEffect(() => {
     const flag = localStorage.getItem("togeda_google_auth_complete");
@@ -565,6 +689,49 @@ export function StickyJoinBar({ type, id, count, payment, currency, status, askT
               </svg>
               Event Has Ended
             </div>
+          ) : hasStartedAndClosed && !isParticipant && !isInQueue ? (
+            <div className="ml-auto flex shrink-0 items-center gap-2 rounded-xl bg-stone-500/20 border border-stone-500/30 px-6 py-3 text-sm font-bold text-stone-300">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4 shrink-0">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+              </svg>
+              Joining Closed
+            </div>
+          ) : isFull && !isParticipant && !isInQueue ? (
+            <div className="ml-auto flex shrink-0 items-center gap-2 rounded-xl bg-stone-500/20 border border-stone-500/30 px-6 py-3 text-sm font-bold text-stone-300">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4 shrink-0">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
+              </svg>
+              Event Is Full
+            </div>
+          ) : needsLocationConfirm ? (
+            <div className="ml-auto flex shrink-0 flex-col items-end gap-1">
+              <button
+                onClick={handleConfirmLocation}
+                disabled={confirmingLocation}
+                className="flex shrink-0 items-center gap-2 rounded-xl bg-blue-500/20 border border-blue-500/30 px-6 py-3 text-sm font-bold text-blue-300 transition-all hover:bg-blue-500/30 active:scale-95 disabled:opacity-60"
+              >
+                {confirmingLocation ? (
+                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="h-4 w-4 shrink-0">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
+                  </svg>
+                )}
+                {confirmingLocation ? "Locating..." : "Confirm Location"}
+              </button>
+              {locationFeedback && (
+                <p
+                  className="text-xs font-medium text-red-300 transition-opacity duration-400"
+                  style={{ opacity: locationFeedback.visible ? 1 : 0 }}
+                >
+                  {locationFeedback.meters}m away · must be within 50m
+                </p>
+              )}
+            </div>
           ) : alreadyJoined ? (
             canLeave ? (
               <button
@@ -592,7 +759,7 @@ export function StickyJoinBar({ type, id, count, payment, currency, status, askT
                 {type === "event" ? "You're going!" : "Joined!"}
               </div>
             )
-          ) : isInQueue ? (
+          ) : (isInQueue || joinResult === "requested") ? (
             <button
               onClick={handleCancel}
               disabled={cancelling}
@@ -628,7 +795,7 @@ export function StickyJoinBar({ type, id, count, payment, currency, status, askT
             </button>
           )}
         </div>
-        {joinResult && joinResult !== "joined" && (
+        {joinResult && joinResult !== "joined" && joinResult !== "requested" && (
           <div
             className="border-t border-white/10 px-6 py-2 text-xs text-center text-stone-300 cursor-pointer"
             onClick={() => setJoinResult(null)}

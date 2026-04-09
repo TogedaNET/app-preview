@@ -5,6 +5,7 @@ import ParticipantScroller from "../components/ParticipantScroller";
 import JoinCTA, { StickyJoinBar } from "../components/JoinCTA";
 import HostRow from "../components/HostRow";
 import AppRedirect from "../components/AppRedirect";
+import LocationMap from "../components/LocationMap";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -47,15 +48,6 @@ function isToday(iso: string) {
   );
 }
 
-function mapSrc(lat: number, lon: number) {
-  const delta = 0.006;
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta},${lat - delta},${lon + delta},${lat + delta}&layer=mapnik&marker=${lat},${lon}`;
-}
-
-function mapSrcBlurred(lat: number, lon: number) {
-  const delta = 0.04;
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta},${lat - delta},${lon + delta},${lat + delta}&layer=mapnik`;
-}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -248,7 +240,7 @@ export default async function EventPage({
               {event.title}
             </h1>
 
-            <JoinCTA type="event" id={id} count={event.participantsCount} payment={event.payment} currency={event.currency} status={event.status} askToJoin={event.askToJoin} />
+            <JoinCTA type="event" id={id} count={event.participantsCount} maximumPeople={event.maximumPeople} payment={event.payment} currency={event.currency} status={event.status} askToJoin={event.askToJoin} allowedJoinAfterStart={event.allowedJoinAfterStart} needsLocationalConfirmation={event.needsLocationalConfirmation} eventLat={event.location.latitude} eventLon={event.location.longitude} />
 
             <EventDetailCard event={event} />
             <ParticipantAvatars participants={participants} count={event.participantsCount} max={event.maximumPeople} />
@@ -292,11 +284,13 @@ export default async function EventPage({
                   : [loc.address, loc.city, loc.country].filter(Boolean).join(", ")}
               </p>
               {hasMap && (
-                <iframe
-                  src={event.askToJoin ? mapSrcBlurred(loc.latitude, loc.longitude) : mapSrc(loc.latitude, loc.longitude)}
-                  title="Event location"
-                  className="h-48 w-full rounded-xl border-0 opacity-90"
-                  loading="lazy"
+                <LocationMap
+                  lat={loc.latitude}
+                  lon={loc.longitude}
+                  askToJoin={event.askToJoin}
+                  id={id}
+                  type="event"
+                  apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
                 />
               )}
             </section>
@@ -304,7 +298,7 @@ export default async function EventPage({
         </div>
       </div>
 
-      <StickyJoinBar type="event" id={id} count={event.participantsCount} payment={event.payment} currency={event.currency} status={event.status} askToJoin={event.askToJoin} />
+      <StickyJoinBar type="event" id={id} count={event.participantsCount} maximumPeople={event.maximumPeople} payment={event.payment} currency={event.currency} status={event.status} askToJoin={event.askToJoin} allowedJoinAfterStart={event.allowedJoinAfterStart} needsLocationalConfirmation={event.needsLocationalConfirmation} eventLat={event.location.latitude} eventLon={event.location.longitude} />
     </div>
   );
 }

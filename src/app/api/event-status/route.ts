@@ -22,10 +22,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Failed to fetch status" }, { status: res.status });
     }
 
-    const data = (await res.json()) as { currentUserStatus?: string; currentUserRole?: string };
+    const data = (await res.json()) as { currentUserStatus?: string; currentUserRole?: string; currentUserArrivalStatus?: string };
     return NextResponse.json({
       currentUserStatus: data.currentUserStatus ?? "NONE",
       currentUserRole: data.currentUserRole ?? "NORMAL",
+      currentUserArrivalStatus: data.currentUserArrivalStatus ?? "NONE",
     });
   } catch (err) {
     const error = err as Error;

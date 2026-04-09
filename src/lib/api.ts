@@ -77,6 +77,7 @@ export interface Event {
   chatRoomId: string | null;
   blockedForCurrentUser: boolean;
   chatRoomIsRestricted: boolean;
+  allowedJoinAfterStart: boolean;
 }
 
 // ── Club ──────────────────────────────────────────────────────────────────────
