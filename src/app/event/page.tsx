@@ -188,7 +188,10 @@ export default async function EventPage({
     event = await fetchEvent(id);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "404") notFound();
+    const message = (err as Error).message ?? "";
+    if (code === "404" || code === "400" || /could not find post/i.test(message)) {
+      notFound();
+    }
     throw err;
   }
 
@@ -240,7 +243,7 @@ export default async function EventPage({
               {event.title}
             </h1>
 
-            <JoinCTA type="event" id={id} count={event.participantsCount} maximumPeople={event.maximumPeople} payment={event.payment} currency={event.currency} status={event.status} askToJoin={event.askToJoin} allowedJoinAfterStart={event.allowedJoinAfterStart} needsLocationalConfirmation={event.needsLocationalConfirmation} eventLat={event.location.latitude} eventLon={event.location.longitude} />
+            <JoinCTA type="event" id={id} count={event.participantsCount} maximumPeople={event.maximumPeople} payment={event.payment} currency={event.currency} status={event.status} askToJoin={event.askToJoin} allowJoinAfterStart={event.allowJoinAfterStart} needsLocationalConfirmation={event.needsLocationalConfirmation} eventLat={event.location.latitude} eventLon={event.location.longitude} ownerEmail={event.owner.email} ownerName={`${event.owner.firstName} ${event.owner.lastName}`} ownerPaysStripeFee={event.ownerPaysStripeFee} />
 
             <EventDetailCard event={event} />
             <ParticipantAvatars participants={participants} count={event.participantsCount} max={event.maximumPeople} />
@@ -298,7 +301,7 @@ export default async function EventPage({
         </div>
       </div>
 
-      <StickyJoinBar type="event" id={id} count={event.participantsCount} maximumPeople={event.maximumPeople} payment={event.payment} currency={event.currency} status={event.status} askToJoin={event.askToJoin} allowedJoinAfterStart={event.allowedJoinAfterStart} needsLocationalConfirmation={event.needsLocationalConfirmation} eventLat={event.location.latitude} eventLon={event.location.longitude} />
+      <StickyJoinBar type="event" id={id} count={event.participantsCount} maximumPeople={event.maximumPeople} payment={event.payment} currency={event.currency} status={event.status} askToJoin={event.askToJoin} allowJoinAfterStart={event.allowJoinAfterStart} needsLocationalConfirmation={event.needsLocationalConfirmation} eventLat={event.location.latitude} eventLon={event.location.longitude} ownerEmail={event.owner.email} ownerName={`${event.owner.firstName} ${event.owner.lastName}`} ownerPaysStripeFee={event.ownerPaysStripeFee} />
     </div>
   );
 }

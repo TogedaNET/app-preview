@@ -9,6 +9,8 @@ export type ParticipantRole = "HOST" | "CO_HOST" | "NORMAL";
 export type ArrivalStatus = "ARRIVED" | "NOT_SHOWN" | "NONE";
 export type EventStatus = "NOT_STARTED" | "HAS_STARTED" | "HAS_ENDED";
 export type UserRole = "NORMAL" | "ADMINISTRATOR" | "PARTNER" | "AMBASSADOR";
+export type ClubMemberRole = "ADMIN" | "MEMBER";
+export type ClubPermissions = "ALL" | "ADMINS_ONLY";
 
 // ── Shared models ────────────────────────────────────────────────────────────
 
@@ -44,6 +46,7 @@ export interface UserProfile {
   birthDate: string;
   isDeleted: boolean;
   userRole: UserRole;
+  email?: string;
 }
 
 // ── Event (Post) ──────────────────────────────────────────────────────────────
@@ -77,7 +80,8 @@ export interface Event {
   chatRoomId: string | null;
   blockedForCurrentUser: boolean;
   chatRoomIsRestricted: boolean;
-  allowedJoinAfterStart: boolean;
+  allowJoinAfterStart: boolean;
+  ownerPaysStripeFee?: boolean;
 }
 
 // ── Club ──────────────────────────────────────────────────────────────────────
@@ -92,12 +96,16 @@ export interface Club {
   accessibility: Accessibility;
   askToJoin: boolean;
   currentUserStatus: ParticipantStatus;
-  currentUserRole: ParticipantRole;
+  currentUserRole: ClubMemberRole | null;
   interests: Interest[];
   memories: string[];
   membersCount: number;
   previewMembers: UserProfile[];
+  permissions: ClubPermissions;
+  chatRoomId: string | null;
+  blockedForCurrentUser: boolean;
   createdAt: string;
+  chatRoomIsRestricted: boolean;
 }
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ import ParticipantScroller from "../components/ParticipantScroller";
 import JoinCTA, { StickyJoinBar } from "../components/JoinCTA";
 import HostRow from "../components/HostRow";
 import AppRedirect from "../components/AppRedirect";
+import LocationMap from "../components/LocationMap";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -14,16 +15,6 @@ function formatDate(iso: string) {
     month: "long",
     year: "numeric",
   }).format(new Date(iso));
-}
-
-function mapSrc(lat: number, lon: number) {
-  const delta = 0.006;
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta},${lat - delta},${lon + delta},${lat + delta}&layer=mapnik&marker=${lat},${lon}`;
-}
-
-function mapSrcBlurred(lat: number, lon: number) {
-  const delta = 0.04;
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta},${lat - delta},${lon + delta},${lat + delta}&layer=mapnik`;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -139,7 +130,10 @@ export default async function ClubPage({
     club = await fetchClub(id);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "404") notFound();
+    const message = (err as Error).message ?? "";
+    if (code === "404" || code === "400" || /could not find club/i.test(message)) {
+      notFound();
+    }
     throw err;
   }
 
@@ -191,7 +185,7 @@ export default async function ClubPage({
             {club.title}
           </h1>
 
-          <JoinCTA type="club" id={id} count={club.membersCount} />
+          <JoinCTA type="club" id={id} count={club.membersCount} askToJoin={club.askToJoin} />
 
           <ClubDetailCard club={club} />
           <MemberAvatars members={members} count={club.membersCount} />
@@ -235,11 +229,13 @@ export default async function ClubPage({
                 : [loc.address, loc.city, loc.country].filter(Boolean).join(", ")}
             </p>
             {hasMap && (
-              <iframe
-                src={club.askToJoin ? mapSrcBlurred(loc.latitude, loc.longitude) : mapSrc(loc.latitude, loc.longitude)}
-                title="Club location"
-                className="h-48 w-full rounded-xl border-0 opacity-90"
-                loading="lazy"
+              <LocationMap
+                lat={loc.latitude}
+                lon={loc.longitude}
+                askToJoin={club.askToJoin}
+                id={id}
+                type="club"
+                apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
               />
             )}
           </section>
@@ -247,7 +243,7 @@ export default async function ClubPage({
       </div>
       </div>
 
-      <StickyJoinBar type="club" id={id} count={club.membersCount} />
+      <StickyJoinBar type="club" id={id} count={club.membersCount} askToJoin={club.askToJoin} />
     </div>
   );
 }

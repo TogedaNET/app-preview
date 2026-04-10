@@ -14,8 +14,7 @@ export async function POST(req: NextRequest) {
     if (type === "event") {
       url = `${env.BACKEND_URL}/posts/${id}/tryToJoinPost`;
     } else {
-      // TODO: confirm club join endpoint
-      url = `${env.BACKEND_URL}/clubs/${id}/tryToJoinClub`;
+      url = `${env.BACKEND_URL}/clubs/${id}/members`;
     }
 
     const res = await fetch(url, {

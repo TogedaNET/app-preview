@@ -8,9 +8,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { id } = (await req.json()) as { id: string };
+    const { type, id } = (await req.json()) as { type?: "event" | "club"; id: string };
 
-    const res = await fetch(`${env.BACKEND_URL}/posts/${id}/cancelJoinRequest`, {
+    const url = type === "club"
+      ? `${env.BACKEND_URL}/clubs/${id}/cancelJoinRequest`
+      : `${env.BACKEND_URL}/posts/${id}/cancelJoinRequest`;
+
+    const res = await fetch(url, {
       method: "POST",
       headers: { Authorization: authorization },
     });

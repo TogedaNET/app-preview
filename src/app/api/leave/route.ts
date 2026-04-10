@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
         : `${env.BACKEND_URL}/clubs/${id}/leave`;
 
     const res = await fetch(url, {
-      method: "DELETE",
+      method: type === "club" ? "POST" : "DELETE",
       headers: { Authorization: authorization },
     });
 
