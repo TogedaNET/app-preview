@@ -14,9 +14,19 @@ export async function POST(req: NextRequest) {
     const { email, password } = parsed.data;
 
     const authResult = await cognitoInitiateAuth(email, password);
-    const accessToken = authResult.AuthenticationResult.AccessToken;
+    const { AccessToken: accessToken, RefreshToken: refreshToken } = authResult.AuthenticationResult;
 
-    return NextResponse.json({ success: true, token: accessToken });
+    const res = NextResponse.json({ success: true, token: accessToken });
+    if (refreshToken) {
+      res.cookies.set("togeda_refresh", refreshToken, {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/api/auth",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 60 * 60 * 24 * 400, // upper bound; actual expiry governed by Cognito
+      });
+    }
+    return res;
   } catch (err) {
     const error = err as NodeJS.ErrnoException & { message: string };
     const message =

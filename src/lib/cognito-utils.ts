@@ -82,7 +82,18 @@ export async function cognitoInitiateAuth(email: string, password: string) {
       PASSWORD: password,
       SECRET_HASH: computeSecretHash(email),
     },
-  }) as Promise<{ AuthenticationResult: { AccessToken: string } }>;
+  }) as Promise<{ AuthenticationResult: { AccessToken: string; RefreshToken?: string } }>;
+}
+
+export async function cognitoRefreshAuth(refreshToken: string, username: string) {
+  return cognitoRequest("InitiateAuth", {
+    AuthFlow: "REFRESH_TOKEN_AUTH",
+    ClientId: env.COGNITO_CLIENT_ID,
+    AuthParameters: {
+      REFRESH_TOKEN: refreshToken,
+      SECRET_HASH: computeSecretHash(username),
+    },
+  }) as Promise<{ AuthenticationResult: { AccessToken: string; RefreshToken?: string } }>;
 }
 
 export async function cognitoResendCode(email: string) {

@@ -59,7 +59,17 @@ export async function POST(req: NextRequest) {
     }
 
     const data = (await backendRes.json()) as BackendLoginResponse;
-    return NextResponse.json({ token: data.accessToken });
+    const res = NextResponse.json({ token: data.accessToken });
+    if (data.refreshToken) {
+      res.cookies.set("togeda_refresh", data.refreshToken, {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/api/auth",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 60 * 60 * 24 * 400,
+      });
+    }
+    return res;
   } catch {
     return NextResponse.json({ error: "Google sign-in failed" }, { status: 500 });
   }

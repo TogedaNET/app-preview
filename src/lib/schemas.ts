@@ -26,6 +26,10 @@ export const googleAuthSchema = z.object({
   code: z.string().min(1, "Missing authorization code"),
 });
 
+export const refreshSchema = z.object({
+  username: z.string().min(1),
+});
+
 export const profileSchema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
