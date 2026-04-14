@@ -1,17 +1,17 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { parseParams } from "~/lib/api-helpers";
 import { env } from "~/env.js";
+import { clubIdParamSchema } from "~/lib/schemas";
+import { verifyAuth } from "~/lib/verify-jwt";
 
 export async function GET(req: NextRequest) {
-  const authorization = req.headers.get("Authorization");
-  if (!authorization) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await verifyAuth(req);
+  if (auth.error) return auth.error;
+  const authorization = auth.authorization;
 
-  const { searchParams } = new URL(req.url);
-  const clubId = searchParams.get("clubId");
-  if (!clubId) {
-    return NextResponse.json({ error: "Missing clubId" }, { status: 400 });
-  }
+  const params = parseParams(new URL(req.url).searchParams, clubIdParamSchema);
+  if (params.error) return params.error;
+  const { clubId } = params.data;
 
   try {
     const res = await fetch(`${env.BACKEND_URL}/clubs/${clubId}`, {
@@ -27,8 +27,7 @@ export async function GET(req: NextRequest) {
       currentUserStatus: data.currentUserStatus ?? "NONE",
       currentUserRole: data.currentUserRole ?? "NORMAL",
     });
-  } catch (err) {
-    const error = err as Error;
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Failed to fetch status" }, { status: 500 });
   }
 }

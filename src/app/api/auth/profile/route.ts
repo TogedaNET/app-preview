@@ -1,30 +1,29 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createUserProfile, type ProfileData } from "~/lib/cognito-utils";
+import { backendError, parseBody } from "~/lib/api-helpers";
+import { createUserProfile } from "~/lib/cognito-utils";
 import { env } from "~/env.js";
+import { profileSchema } from "~/lib/schemas";
+import { verifyAuth } from "~/lib/verify-jwt";
 
 export async function POST(req: NextRequest) {
-  const authorization = req.headers.get("Authorization");
-  if (!authorization) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authResult = await verifyAuth(req);
+  if (authResult.error) return authResult.error;
 
   try {
-    const profileData = (await req.json()) as ProfileData;
-    const token = authorization.replace(/^Bearer\s+/i, "");
+    const parsed = await parseBody(req, profileSchema);
+    if (parsed.error) return parsed.error;
+    const profileData = parsed.data;
+    const token = authResult.token;
 
     const res = await createUserProfile(token, profileData, env.BACKEND_URL);
 
     if (!res.ok && res.status !== 409) {
       const body = await res.text().catch(() => "");
-      return NextResponse.json(
-        { error: `Failed to create profile: ${body}` },
-        { status: res.status }
-      );
+      return backendError("Failed to create profile", res.status, body);
     }
 
     return NextResponse.json({ success: true });
-  } catch (err) {
-    const error = err as Error;
-    return NextResponse.json({ error: error.message }, { status: 400 });
+  } catch {
+    return NextResponse.json({ error: "Failed to create profile" }, { status: 400 });
   }
 }

@@ -1,14 +1,18 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { parseBody } from "~/lib/api-helpers";
 import { env } from "~/env.js";
+import { confirmArrivalSchema } from "~/lib/schemas";
+import { verifyAuth } from "~/lib/verify-jwt";
 
 export async function POST(req: NextRequest) {
-  const authorization = req.headers.get("Authorization");
-  if (!authorization) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await verifyAuth(req);
+  if (auth.error) return auth.error;
+  const authorization = auth.authorization;
 
   try {
-    const { postId } = (await req.json()) as { postId: string };
+    const parsed = await parseBody(req, confirmArrivalSchema);
+    if (parsed.error) return parsed.error;
+    const { postId } = parsed.data;
 
     const res = await fetch(`${env.BACKEND_URL}/posts/${postId}/arrival`, {
       method: "POST",
@@ -28,8 +32,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (err) {
-    const error = err as Error;
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Failed to confirm arrival" }, { status: 500 });
   }
 }

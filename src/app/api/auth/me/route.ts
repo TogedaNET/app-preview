@@ -1,32 +1,14 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { backendError } from "~/lib/api-helpers";
 import { env } from "~/env.js";
-
-function extractSub(token: string): string | null {
-  try {
-    const payload = token.split(".")[1];
-    if (!payload) return null;
-    const decoded = JSON.parse(
-      Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf-8"),
-    ) as { sub?: string };
-    return decoded.sub ?? null;
-  } catch {
-    return null;
-  }
-}
+import { verifyAuth } from "~/lib/verify-jwt";
 
 export async function GET(req: NextRequest) {
-  const authorization = req.headers.get("Authorization");
-  if (!authorization) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await verifyAuth(req);
+  if (auth.error) return auth.error;
 
-  const sub = extractSub(authorization.replace("Bearer ", ""));
-  if (!sub) {
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-  }
-
-  const res = await fetch(`${env.BACKEND_URL}/users/${sub}`, {
-    headers: { Authorization: authorization },
+  const res = await fetch(`${env.BACKEND_URL}/users/${auth.user.sub}`, {
+    headers: { Authorization: auth.authorization },
     cache: "no-store",
   });
 
@@ -36,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    return NextResponse.json({ error: body }, { status: res.status });
+    return backendError("Failed to fetch user", res.status, body);
   }
 
   return NextResponse.json(await res.json());

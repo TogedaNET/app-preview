@@ -1,12 +1,17 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { parseBody } from "~/lib/api-helpers";
 import { cognitoInitiateAuth } from "~/lib/cognito-utils";
+import { rateLimit } from "~/lib/rate-limit";
+import { loginSchema } from "~/lib/schemas";
 
 export async function POST(req: NextRequest) {
+  const limited = rateLimit(req, "auth:login", 5);
+  if (limited) return limited;
+
   try {
-    const { email, password } = (await req.json()) as {
-      email: string;
-      password: string;
-    };
+    const parsed = await parseBody(req, loginSchema);
+    if (parsed.error) return parsed.error;
+    const { email, password } = parsed.data;
 
     const authResult = await cognitoInitiateAuth(email, password);
     const accessToken = authResult.AuthenticationResult.AccessToken;

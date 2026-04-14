@@ -1,5 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { backendError, parseBody } from "~/lib/api-helpers";
 import { env } from "~/env.js";
+import { googleAuthSchema } from "~/lib/schemas";
 
 interface GoogleTokenResponse {
   id_token?: string;
@@ -15,11 +17,9 @@ interface BackendLoginResponse {
 
 export async function POST(req: NextRequest) {
   try {
-    const { code } = (await req.json()) as { code?: string };
-
-    if (!code) {
-      return NextResponse.json({ error: "Missing authorization code" }, { status: 400 });
-    }
+    const parsed = await parseBody(req, googleAuthSchema);
+    if (parsed.error) return parsed.error;
+    const { code } = parsed.data;
 
     if (!env.GOOGLE_CLIENT_SECRET || !env.NEXT_PUBLIC_GOOGLE_CLIENT_ID) {
       return NextResponse.json({ error: "Google OAuth not configured" }, { status: 503 });
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
 
     if (!tokenRes.ok || !tokenData.id_token) {
       return NextResponse.json(
-        { error: tokenData.error_description ?? "Failed to exchange Google code" },
+        { error: "Failed to exchange Google code" },
         { status: 400 }
       );
     }
@@ -55,13 +55,12 @@ export async function POST(req: NextRequest) {
 
     if (!backendRes.ok) {
       const body = await backendRes.text().catch(() => "");
-      return NextResponse.json({ error: `Sign-in failed: ${body}` }, { status: backendRes.status });
+      return backendError("Google sign-in failed", backendRes.status, body);
     }
 
     const data = (await backendRes.json()) as BackendLoginResponse;
     return NextResponse.json({ token: data.accessToken });
-  } catch (err) {
-    const error = err as Error;
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Google sign-in failed" }, { status: 500 });
   }
 }

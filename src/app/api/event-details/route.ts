@@ -1,5 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { parseParams } from "~/lib/api-helpers";
 import { env } from "~/env.js";
+import { postIdParamSchema } from "~/lib/schemas";
+import { verifyAuth } from "~/lib/verify-jwt";
 
 interface EventDetails {
   status: string;
@@ -9,16 +12,13 @@ interface EventDetails {
 }
 
 export async function GET(req: NextRequest) {
-  const authorization = req.headers.get("Authorization");
-  if (!authorization) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await verifyAuth(req);
+  if (auth.error) return auth.error;
+  const authorization = auth.authorization;
 
-  const { searchParams } = new URL(req.url);
-  const postId = searchParams.get("postId");
-  if (!postId) {
-    return NextResponse.json({ error: "Missing postId" }, { status: 400 });
-  }
+  const params = parseParams(new URL(req.url).searchParams, postIdParamSchema);
+  if (params.error) return params.error;
+  const { postId } = params.data;
 
   try {
     const res = await fetch(`${env.BACKEND_URL}/posts/${postId}`, {
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
       participantsCount: data.participantsCount,
       maximumPeople: data.maximumPeople,
     });
-  } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Failed to fetch event" }, { status: 500 });
   }
 }

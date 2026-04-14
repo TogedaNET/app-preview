@@ -1,17 +1,17 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { parseParams } from "~/lib/api-helpers";
 import { env } from "~/env.js";
+import { postIdParamSchema } from "~/lib/schemas";
+import { verifyAuth } from "~/lib/verify-jwt";
 
 export async function GET(req: NextRequest) {
-  const authorization = req.headers.get("Authorization");
-  if (!authorization) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await verifyAuth(req);
+  if (auth.error) return auth.error;
+  const authorization = auth.authorization;
 
-  const { searchParams } = new URL(req.url);
-  const postId = searchParams.get("postId");
-  if (!postId) {
-    return NextResponse.json({ error: "Missing postId" }, { status: 400 });
-  }
+  const params = parseParams(new URL(req.url).searchParams, postIdParamSchema);
+  if (params.error) return params.error;
+  const { postId } = params.data;
 
   try {
     const res = await fetch(
@@ -35,8 +35,7 @@ export async function GET(req: NextRequest) {
 
     const data: unknown = await res.json();
     return NextResponse.json(data);
-  } catch (err) {
-    const error = err as Error;
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Failed to initialize payment" }, { status: 500 });
   }
 }

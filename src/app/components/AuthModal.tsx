@@ -251,16 +251,14 @@ const photoInputRef = useRef<HTMLInputElement>(null);
   const [verifyCode, setVerifyCode] = useState("");
 
 
-  // Pre-fill email/password from localStorage when resuming a pending verification
+  // Pre-fill email from localStorage when resuming a pending verification
   useEffect(() => {
     if (initialScreen === "verify") {
       const pendingEmail = localStorage.getItem("togeda_pending_email");
-      const pendingPassword = localStorage.getItem("togeda_pending_password");
-      if (pendingEmail ?? pendingPassword) {
+      if (pendingEmail) {
         setRegForm((f) => ({
           ...f,
-          email: pendingEmail ?? f.email,
-          password: pendingPassword ?? f.password,
+          email: pendingEmail,
         }));
       }
     }
@@ -538,9 +536,8 @@ const photoInputRef = useRef<HTMLInputElement>(null);
         setLoading(false);
         return;
       }
-      // Persist so we can resume after a page refresh
+      // Persist email so we can resume verification after a page refresh
       localStorage.setItem("togeda_pending_email", regForm.email);
-      localStorage.setItem("togeda_pending_password", regForm.password);
       setScreen("verify");
     } catch {
       setError("Network error. Please try again.");
@@ -829,10 +826,18 @@ const photoInputRef = useRef<HTMLInputElement>(null);
         return;
       }
 
-      const token = data.token!;
-      localStorage.setItem("togeda_token", token);
       localStorage.removeItem("togeda_pending_email");
-      localStorage.removeItem("togeda_pending_password");
+
+      const token = data.token as string | null;
+
+      if (!token) {
+        // Password wasn't available (page was refreshed) — redirect to login
+        setLoading(false);
+        setScreen("login");
+        return;
+      }
+
+      localStorage.setItem("togeda_token", token);
 
       // Check if user already has a profile
       const meRes = await fetch("/api/auth/me", {
@@ -1424,7 +1429,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
         <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
         <div className="mb-4 flex justify-end">
           <button
-            onClick={() => { localStorage.removeItem("togeda_pending_email"); localStorage.removeItem("togeda_pending_password"); onClose(); }}
+            onClick={() => { localStorage.removeItem("togeda_pending_email"); onClose(); }}
             className="text-xs text-stone-500 hover:text-white transition-colors"
           >
             Log out

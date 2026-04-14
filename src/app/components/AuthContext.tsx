@@ -95,6 +95,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   function logout() {
     localStorage.removeItem("togeda_joined_events");
+    localStorage.removeItem("togeda_pending_email");
+    localStorage.removeItem("togeda_pending_password");
     setToken(null);
   }
 

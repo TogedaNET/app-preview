@@ -1,14 +1,18 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { parseBody } from "~/lib/api-helpers";
 import { env } from "~/env.js";
+import { cancelJoinSchema } from "~/lib/schemas";
+import { verifyAuth } from "~/lib/verify-jwt";
 
 export async function POST(req: NextRequest) {
-  const authorization = req.headers.get("Authorization");
-  if (!authorization) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await verifyAuth(req);
+  if (auth.error) return auth.error;
+  const authorization = auth.authorization;
 
   try {
-    const { type, id } = (await req.json()) as { type?: "event" | "club"; id: string };
+    const parsed = await parseBody(req, cancelJoinSchema);
+    if (parsed.error) return parsed.error;
+    const { type, id } = parsed.data;
 
     const url = type === "club"
       ? `${env.BACKEND_URL}/clubs/${id}/cancelJoinRequest`
@@ -32,8 +36,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (err) {
-    const error = err as Error;
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "Failed to cancel request" }, { status: 500 });
   }
 }
