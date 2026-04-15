@@ -3,7 +3,9 @@ import { fetchEvent, fetchEventParticipants, type Event, type UserProfile } from
 import ImageGallery from "../components/ImageGallery";
 import ParticipantScroller from "../components/ParticipantScroller";
 import JoinCTA, { StickyJoinBar } from "../components/JoinCTA";
+import HostRow from "../components/HostRow";
 import AppRedirect from "../components/AppRedirect";
+import LocationMap from "../components/LocationMap";
 import EventDateFormatter from "../components/EventDateFormatter";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -47,15 +49,6 @@ function isToday(iso: string) {
   );
 }
 
-function mapSrc(lat: number, lon: number) {
-  const delta = 0.006;
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta},${lat - delta},${lon + delta},${lat + delta}&layer=mapnik&marker=${lat},${lon}`;
-}
-
-function mapSrcBlurred(lat: number, lon: number) {
-  const delta = 0.04;
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta},${lat - delta},${lon + delta},${lat + delta}&layer=mapnik`;
-}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -71,7 +64,7 @@ function ParticipantAvatars({ participants, count, max }: { participants: UserPr
           {max > 0 && <span className="font-semibold text-white"> / {max}</span>} going
         </span>
       </div>
-      <ParticipantScroller participants={participants} count={count} />
+      <ParticipantScroller participants={participants} count={count} type="event" />
     </section>
   );
 }
@@ -90,23 +83,8 @@ function EventDetailCard({ event }: { event: Event }) {
 
       <ul className="space-y-4">
         {/* Organizer */}
-        <li className="flex items-center gap-3">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center text-stone-400">
-            <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.563.563 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z" />
-            </svg>
-          </span>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-white truncate">{ownerName}</p>
-            <p className="text-xs text-stone-400">Host of the event</p>
-          </div>
-          {ownerPhoto && (
-            <img
-              src={ownerPhoto}
-              alt={ownerName}
-              className="h-9 w-9 shrink-0 rounded-full object-cover border border-white/10"
-            />
-          )}
+        <li>
+          <HostRow name={ownerName} photo={ownerPhoto} type="event" />
         </li>
 
         {/* Date & time */}
@@ -117,6 +95,22 @@ function EventDetailCard({ event }: { event: Event }) {
             </svg>
           </span>
           <div>
+            {event.fromDate && event.toDate ? (
+              <>
+                <p className="text-sm font-medium text-white">
+                  {formatDateRange(event.fromDate, event.toDate)}
+                </p>
+                <p className="text-xs text-stone-400">
+                  {isToday(event.fromDate) ? "Today · " : ""}
+                  {formatFullDate(event.fromDate)}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-medium text-white">Any Day</p>
+                <p className="text-xs text-stone-400">No fixed Date & Time</p>
+              </>
+            )}
             <p className="text-sm font-medium text-white">
               <EventDateFormatter fromDate={event.fromDate} toDate={event.toDate} />
             </p>
@@ -202,7 +196,10 @@ export default async function EventPage({
     event = await fetchEvent(id);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "404") notFound();
+    const message = (err as Error).message ?? "";
+    if (code === "404" || code === "400" || /could not find post/i.test(message)) {
+      notFound();
+    }
     throw err;
   }
 
@@ -213,7 +210,7 @@ export default async function EventPage({
   const hasMap = loc.latitude !== 0 && loc.longitude !== 0;
 
   return (
-    <div className="relative min-h-screen text-white">
+    <div className="relative min-h-dvh text-white">
       <AppRedirect type="event" id={id} />
       {/* Blurred background from event image */}
       {heroImage && (
@@ -254,7 +251,7 @@ export default async function EventPage({
               {event.title}
             </h1>
 
-            <JoinCTA type="event" id={id} count={event.participantsCount} />
+            <JoinCTA type="event" id={id} count={event.participantsCount} maximumPeople={event.maximumPeople} payment={event.payment} currency={event.currency} status={event.status} askToJoin={event.askToJoin} allowJoinAfterStart={event.allowJoinAfterStart} needsLocationalConfirmation={event.needsLocationalConfirmation} eventLat={event.location.latitude} eventLon={event.location.longitude} ownerEmail={event.owner.email} ownerName={`${event.owner.firstName} ${event.owner.lastName}`} ownerPaysStripeFee={event.ownerPaysStripeFee} />
 
             <EventDetailCard event={event} />
             <ParticipantAvatars participants={participants} count={event.participantsCount} max={event.maximumPeople} />
@@ -298,11 +295,13 @@ export default async function EventPage({
                   : [loc.address, loc.city, loc.country].filter(Boolean).join(", ")}
               </p>
               {hasMap && (
-                <iframe
-                  src={event.askToJoin ? mapSrcBlurred(loc.latitude, loc.longitude) : mapSrc(loc.latitude, loc.longitude)}
-                  title="Event location"
-                  className="h-48 w-full rounded-xl border-0 opacity-90"
-                  loading="lazy"
+                <LocationMap
+                  lat={loc.latitude}
+                  lon={loc.longitude}
+                  askToJoin={event.askToJoin}
+                  id={id}
+                  type="event"
+                  apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}
                 />
               )}
             </section>
@@ -310,7 +309,7 @@ export default async function EventPage({
         </div>
       </div>
 
-      <StickyJoinBar type="event" id={id} count={event.participantsCount} />
+      <StickyJoinBar type="event" id={id} count={event.participantsCount} maximumPeople={event.maximumPeople} payment={event.payment} currency={event.currency} status={event.status} askToJoin={event.askToJoin} allowJoinAfterStart={event.allowJoinAfterStart} needsLocationalConfirmation={event.needsLocationalConfirmation} eventLat={event.location.latitude} eventLon={event.location.longitude} ownerEmail={event.owner.email} ownerName={`${event.owner.firstName} ${event.owner.lastName}`} ownerPaysStripeFee={event.ownerPaysStripeFee} />
     </div>
   );
 }

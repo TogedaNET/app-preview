@@ -1,19 +1,18 @@
 import { env } from "~/env.js";
 import { getServiceToken } from "./auth";
 
-// ── Shared types ─────────────────────────────────────────────────────────────
+// ── Enums ────────────────────────────────────────────────────────────────────
 
-export interface UserProfile {
-  id: string;
-  firstName: string;
-  lastName: string;
-  profilePhotos: string[];
-  occupation: string;
-  location: Location;
-  birthDate: string;
-  isDeleted: boolean;
-  userRole: string;
-}
+export type Accessibility = "PUBLIC" | "PRIVATE";
+export type ParticipantStatus = "NOT_PARTICIPATING" | "IN_QUEUE" | "PARTICIPATING";
+export type ParticipantRole = "HOST" | "CO_HOST" | "NORMAL";
+export type ArrivalStatus = "ARRIVED" | "NOT_SHOWN" | "NONE";
+export type EventStatus = "NOT_STARTED" | "HAS_STARTED" | "HAS_ENDED";
+export type UserRole = "NORMAL" | "ADMINISTRATOR" | "PARTNER" | "AMBASSADOR";
+export type ClubMemberRole = "ADMIN" | "MEMBER";
+export type ClubPermissions = "ALL" | "ADMINS_ONLY";
+
+// ── Shared models ────────────────────────────────────────────────────────────
 
 export interface Location {
   name: string;
@@ -37,6 +36,19 @@ export interface Currency {
   code: string;
 }
 
+export interface UserProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  profilePhotos: string[];
+  occupation: string;
+  location: Location;
+  birthDate: string;
+  isDeleted: boolean;
+  userRole: UserRole;
+  email?: string;
+}
+
 // ── Event (Post) ──────────────────────────────────────────────────────────────
 
 export interface Event {
@@ -53,15 +65,23 @@ export interface Event {
   owner: UserProfile;
   payment: number;
   currency: Currency;
-  currentUserStatus: string;
-  currentUserRole: string;
-  accessibility: "PUBLIC" | "PRIVATE";
+  currentUserStatus: ParticipantStatus;
+  currentUserRole: ParticipantRole;
+  currentUserArrivalStatus: ArrivalStatus;
+  accessibility: Accessibility;
   askToJoin: boolean;
-  participantsCount: number;
-  status: string;
+  needsLocationalConfirmation: boolean;
+  rating: number;
   hasTickets: boolean;
   clubId: string | null;
-  rating: number;
+  participantsCount: number;
+  status: EventStatus;
+  savedByCurrentUser: boolean;
+  chatRoomId: string | null;
+  blockedForCurrentUser: boolean;
+  chatRoomIsRestricted: boolean;
+  allowJoinAfterStart: boolean;
+  ownerPaysStripeFee?: boolean;
 }
 
 // ── Club ──────────────────────────────────────────────────────────────────────
@@ -73,15 +93,19 @@ export interface Club {
   images: string[];
   description: string;
   location: Location;
-  accessibility: "PUBLIC" | "PRIVATE";
+  accessibility: Accessibility;
   askToJoin: boolean;
-  currentUserStatus: string;
-  currentUserRole: string;
+  currentUserStatus: ParticipantStatus;
+  currentUserRole: ClubMemberRole | null;
   interests: Interest[];
   memories: string[];
   membersCount: number;
   previewMembers: UserProfile[];
+  permissions: ClubPermissions;
+  chatRoomId: string | null;
+  blockedForCurrentUser: boolean;
   createdAt: string;
+  chatRoomIsRestricted: boolean;
 }
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
@@ -93,7 +117,7 @@ async function apiFetch<T>(path: string): Promise<T> {
       accept: "application/json",
       Authorization: `Bearer ${token}`,
     },
-    next: { revalidate: 60 },
+    cache: "no-store",
   });
 
   if (!response.ok) {
