@@ -449,6 +449,7 @@ const photoInputRef = useRef<HTMLInputElement>(null);
       year: "",
       gender: "",
       occupation: "",
+      city: "",
     };
     let valid = true;
 
