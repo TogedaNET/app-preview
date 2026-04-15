@@ -10,25 +10,6 @@ import EventDateFormatter from "../components/EventDateFormatter";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function formatDateRange(from: string, to: string) {
-  const f = new Date(from);
-  const t = new Date(to);
-  const date = new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "short",
-  }).format(f);
-  const fromTime = new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(f);
-  const toTime = new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(t);
-  return `${date}, ${fromTime}–${toTime}`;
-}
 
 function formatFullDate(iso: string) {
   return new Intl.DateTimeFormat("en-GB", {
@@ -98,7 +79,7 @@ function EventDetailCard({ event }: { event: Event }) {
             {event.fromDate && event.toDate ? (
               <>
                 <p className="text-sm font-medium text-white">
-                  {formatDateRange(event.fromDate, event.toDate)}
+                  <EventDateFormatter fromDate={event.fromDate} toDate={event.toDate} />
                 </p>
                 <p className="text-xs text-stone-400">
                   {isToday(event.fromDate) ? "Today · " : ""}
@@ -111,13 +92,6 @@ function EventDetailCard({ event }: { event: Event }) {
                 <p className="text-xs text-stone-400">No fixed Date & Time</p>
               </>
             )}
-            <p className="text-sm font-medium text-white">
-              <EventDateFormatter fromDate={event.fromDate} toDate={event.toDate} />
-            </p>
-            <p className="text-xs text-stone-400">
-              {isToday(event.fromDate) ? "Today · " : ""}
-              {formatFullDate(event.fromDate)}
-            </p>
           </div>
         </li>
 
