@@ -6,6 +6,7 @@ import JoinCTA, { StickyJoinBar } from "../components/JoinCTA";
 import HostRow from "../components/HostRow";
 import AppRedirect from "../components/AppRedirect";
 import LocationMap from "../components/LocationMap";
+import EventDateFormatter from "../components/EventDateFormatter";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -110,6 +111,13 @@ function EventDetailCard({ event }: { event: Event }) {
                 <p className="text-xs text-stone-400">No fixed Date & Time</p>
               </>
             )}
+            <p className="text-sm font-medium text-white">
+              <EventDateFormatter fromDate={event.fromDate} toDate={event.toDate} />
+            </p>
+            <p className="text-xs text-stone-400">
+              {isToday(event.fromDate) ? "Today · " : ""}
+              {formatFullDate(event.fromDate)}
+            </p>
           </div>
         </li>
 

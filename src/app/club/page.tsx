@@ -6,15 +6,18 @@ import JoinCTA, { StickyJoinBar } from "../components/JoinCTA";
 import HostRow from "../components/HostRow";
 import AppRedirect from "../components/AppRedirect";
 import LocationMap from "../components/LocationMap";
+import DateFormatter from "../components/DateFormatter";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function formatDate(iso: string) {
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  }).format(new Date(iso));
+function mapSrc(lat: number, lon: number) {
+  const delta = 0.006;
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta},${lat - delta},${lon + delta},${lat + delta}&layer=mapnik&marker=${lat},${lon}`;
+}
+
+function mapSrcBlurred(lat: number, lon: number) {
+  const delta = 0.04;
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - delta},${lat - delta},${lon + delta},${lat + delta}&layer=mapnik`;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -106,7 +109,7 @@ function ClubDetailCard({ club }: { club: Club }) {
             </span>
             <div>
               <p className="text-sm font-medium text-white">Founded</p>
-              <p className="text-xs text-stone-400">{formatDate(club.createdAt)}</p>
+              <p className="text-xs text-stone-400"><DateFormatter iso={club.createdAt} /></p>
             </div>
           </li>
         )}
