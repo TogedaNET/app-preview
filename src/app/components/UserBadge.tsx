@@ -1,8 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useAuth } from "./AuthContext";
 import AuthModal from "./AuthModal";
+import { StoreModal } from "./JoinCTA";
+
+const DEEP_LINK_SCHEME = "togedaapp";
+const ANDROID_PACKAGE = "net.togeda.app";
+const ANDROID_API_HOST = "api.togeda.net";
 
 interface UserInfo {
   firstName: string;
@@ -22,8 +28,50 @@ export default function UserBadge() {
   const [showAuth, setShowAuth] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [showStoreModal, setShowStoreModal] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const hasAutoOpenedModal = useRef(false);
+  const storeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // Derive deep link target from URL when on an event/club page
+  const pageType = pathname === "/event" ? "event" as const
+    : pathname === "/club" ? "club" as const
+    : null;
+  const pageId = searchParams.get("id");
+
+  function handleOpenInApp() {
+    const ua = navigator.userAgent;
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    const isAndroid = /Android/i.test(ua);
+
+    // If we're on an event/club page, try to deep link into the app first
+    if (pageType && pageId && (isIOS || isAndroid)) {
+      let deepLink: string;
+      if (isAndroid) {
+        deepLink = `intent://${ANDROID_API_HOST}/in-app/${pageType}?id=${pageId}#Intent;scheme=https;package=${ANDROID_PACKAGE};end`;
+      } else {
+        deepLink = `${DEEP_LINK_SCHEME}://${pageType}?id=${pageId}`;
+      }
+      window.location.href = deepLink;
+
+      const onHide = () => {
+        if (storeTimerRef.current) clearTimeout(storeTimerRef.current);
+        document.removeEventListener("visibilitychange", onHide);
+      };
+      document.addEventListener("visibilitychange", onHide);
+      storeTimerRef.current = setTimeout(() => {
+        document.removeEventListener("visibilitychange", onHide);
+        setShowStoreModal(true);
+      }, 1800);
+      return;
+    }
+
+    // Desktop or no specific page context → show store modal directly
+    setShowStoreModal(true);
+  }
 
   const fetchInfo = useCallback(() => {
     if (!token) return;
@@ -86,12 +134,20 @@ export default function UserBadge() {
   if (!isAuthenticated || !user) {
     return (
       <>
-        <button
-          onClick={() => setShowAuth(true)}
-          className="fixed right-4 top-4 z-9998 rounded-full bg-white px-4 py-2 text-sm font-semibold text-stone-900 shadow-lg transition-all hover:bg-stone-100 active:scale-95"
-        >
-          Log in
-        </button>
+        <div className="fixed right-4 top-4 z-9998 flex items-center gap-2">
+          <button
+            onClick={handleOpenInApp}
+            className="rounded-full bg-white/10 border border-white/20 px-4 py-2 text-sm font-semibold text-white shadow-lg backdrop-blur-sm transition-all hover:bg-white/20 active:scale-95"
+          >
+            Open in App
+          </button>
+          <button
+            onClick={() => setShowAuth(true)}
+            className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-stone-900 shadow-lg transition-all hover:bg-stone-100 active:scale-95"
+          >
+            Log in
+          </button>
+        </div>
         {showAuth && <AuthModal onClose={() => setShowAuth(false)} onProfileCreated={fetchInfo} />}
         {showVerifyModal && (
           <AuthModal
@@ -101,6 +157,7 @@ export default function UserBadge() {
             onProfileCreated={fetchInfo}
           />
         )}
+        {showStoreModal && <StoreModal type={pageType ?? "event"} onClose={() => setShowStoreModal(false)} variant="explore" />}
       </>
     );
   }
@@ -111,7 +168,14 @@ export default function UserBadge() {
   const initial = (info?.firstName ?? user.email).charAt(0).toUpperCase();
 
   return (
-    <div ref={ref} className="fixed right-4 top-4 z-9998">
+    <div ref={ref} className="fixed right-4 top-4 z-9998 flex items-center gap-2">
+      {/* Open in App button */}
+      <button
+        onClick={handleOpenInApp}
+        className="rounded-full bg-white/10 border border-white/20 px-4 py-2 text-sm font-semibold text-white shadow-lg backdrop-blur-sm transition-all hover:bg-white/20 active:scale-95"
+      >
+        Open in App
+      </button>
       {/* Avatar button */}
       <button
         onClick={() => setOpen((v) => !v)}
@@ -186,6 +250,7 @@ export default function UserBadge() {
           onProfileCreated={fetchInfo}
         />
       )}
+      {showStoreModal && <StoreModal type={pageType ?? "event"} onClose={() => setShowStoreModal(false)} variant="explore" />}
     </div>
   );
 }

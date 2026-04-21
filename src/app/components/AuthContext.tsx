@@ -93,7 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     const name = localStorage.getItem("togeda_display_name");
     if (name) setDisplayNameState(name);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, []);
 
   // Whenever the access token changes, schedule a proactive refresh just before it expires
