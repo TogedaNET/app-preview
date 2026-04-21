@@ -209,60 +209,45 @@ function useJoin(
     : userRole === "HOST" || userRole === "CO_HOST";
 
   async function handleJoin() {
-    if (platform === "desktop" || platform === "unknown") {
-      if (isAuthenticated && token) {
-        const isPaid = type === "event" && payment && payment > 0;
-        if (isPaid) {
-          setShowPaymentModal(true);
-        } else {
-          // Free event → call /posts/{id}/tryToJoinPost via proxy
-          setJoining(true);
-          try {
-            const res = await fetch("/api/join", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-              body: JSON.stringify({ type, id }),
-            });
-            const data = (await res.json()) as { success?: boolean; error?: string };
-            if (data.success) {
-              setJoinResult(askToJoin ? "requested" : "joined");
-              setStatusKey((k) => k + 1);
-              router.refresh();
-            } else {
-              const msg = (data.error ?? "").toLowerCase();
-              if (msg.includes("already")) {
-                setJoinResult("already");
-                setStatusKey((k) => k + 1);
-                router.refresh();
-              } else if (msg.includes("request")) setJoinResult("requested");
-              else if (["started", "ended", "past", "expired"].some((k) => msg.includes(k))) setJoinResult("ended");
-              else setJoinResult("error");
-            }
-          } catch {
-            setJoinResult("error");
-          } finally {
-            setJoining(false);
-          }
-        }
-      } else {
-        setShowAuthModal(true);
-      }
+    if (!isAuthenticated || !token) {
+      setShowAuthModal(true);
       return;
     }
 
-    // Mobile (iOS + Android): try deep link, show StoreModal if app doesn't open
-    const deepLink = buildDeepLink(type, id, platform);
-    window.location.href = deepLink;
+    const isPaid = type === "event" && payment && payment > 0;
+    if (isPaid) {
+      setShowPaymentModal(true);
+      return;
+    }
 
-    const onHide = () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      document.removeEventListener("visibilitychange", onHide);
-    };
-    document.addEventListener("visibilitychange", onHide);
-    timerRef.current = setTimeout(() => {
-      document.removeEventListener("visibilitychange", onHide);
-      setShowModal(true);
-    }, 1800);
+    // Free event → call /posts/{id}/tryToJoinPost via proxy
+    setJoining(true);
+    try {
+      const res = await fetch("/api/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ type, id }),
+      });
+      const data = (await res.json()) as { success?: boolean; error?: string };
+      if (data.success) {
+        setJoinResult(askToJoin ? "requested" : "joined");
+        setStatusKey((k) => k + 1);
+        router.refresh();
+      } else {
+        const msg = (data.error ?? "").toLowerCase();
+        if (msg.includes("already")) {
+          setJoinResult("already");
+          setStatusKey((k) => k + 1);
+          router.refresh();
+        } else if (msg.includes("request")) setJoinResult("requested");
+        else if (["started", "ended", "past", "expired"].some((k) => msg.includes(k))) setJoinResult("ended");
+        else setJoinResult("error");
+      }
+    } catch {
+      setJoinResult("error");
+    } finally {
+      setJoining(false);
+    }
   }
 
   const [leaving, setLeaving] = useState(false);
