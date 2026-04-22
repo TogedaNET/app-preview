@@ -110,7 +110,7 @@ export default function UserBadge() {
         }
       })
       .catch(() => undefined);
-  }, [isAuthenticated, token]);
+  }, [isAuthenticated, token, logout]);
 
   // Case 2: registered but email not yet confirmed → open verify
   useEffect(() => {
