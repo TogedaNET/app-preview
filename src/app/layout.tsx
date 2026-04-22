@@ -1,5 +1,6 @@
 import "~/styles/globals.css";
 
+import { Suspense } from "react";
 import { type Metadata } from "next";
 import { Geist } from "next/font/google";
 import { AuthProvider } from "./components/AuthContext";
@@ -24,7 +25,9 @@ export default function RootLayout({
       <body suppressHydrationWarning>
         <GoogleProvider>
           <AuthProvider>
-            <UserBadge />
+            <Suspense fallback={null}>
+              <UserBadge />
+            </Suspense>
             {children}
           </AuthProvider>
         </GoogleProvider>
