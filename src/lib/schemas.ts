@@ -64,6 +64,9 @@ export const profileSchema = z.object({
 export const joinSchema = z.object({
   type: z.enum(["event", "club"]),
   id: z.string().min(1),
+  // Optional promo code — only meaningful for a paid event whose code makes it free (100% off),
+  // where joining goes through the free-join endpoint instead of the payment sheet.
+  promoCode: z.string().optional(),
 });
 
 export const leaveSchema = z.object({

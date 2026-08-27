@@ -12,11 +12,13 @@ export async function POST(req: NextRequest) {
   try {
     const parsed = await parseBody(req, joinSchema);
     if (parsed.error) return parsed.error;
-    const { type, id } = parsed.data;
+    const { type, id, promoCode } = parsed.data;
 
     let url: string;
     if (type === "event") {
-      url = `${env.BACKEND_URL}/posts/${id}/tryToJoinPost`;
+      const eventUrl = new URL(`${env.BACKEND_URL}/posts/${id}/tryToJoinPost`);
+      if (promoCode) eventUrl.searchParams.set("promoCode", promoCode);
+      url = eventUrl.toString();
     } else {
       url = `${env.BACKEND_URL}/clubs/${id}/members`;
     }

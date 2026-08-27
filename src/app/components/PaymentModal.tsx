@@ -27,6 +27,26 @@ export interface PostFees {
   postPrice: number;
   totalPrice: number;
   currency?: { name: string; symbol: string; code: string };
+  // Present when a discount (tier or promo code) applies: the pre-discount price and the amount off.
+  originalPrice?: number;
+  discountedAmount?: number;
+}
+
+// ── Friendly error mapping ────────────────────────────────────────────────────
+// The backend surfaces raw Stripe errors when a host's connected account isn't ready
+// to take payments (no payment methods activated for the currency, onboarding
+// incomplete, or no Stripe account at all). Those messages are meaningless to a buyer,
+// so translate the known ones into a clear "contact the organizer" nudge.
+function friendlyPaymentError(raw: string | null): string | null {
+  if (!raw) return raw;
+  const r = raw.toLowerCase();
+  if (r.includes("payment method") || r.includes("payment_method")) {
+    return "This event can't take card payments right now — the organizer's payment setup isn't finished. Please reach out to the organizer before trying again.";
+  }
+  if (r.includes("stripe account") || r.includes("connected account")) {
+    return "This event isn't set up to accept payments yet. Please contact the organizer.";
+  }
+  return raw;
 }
 
 // ── Fee breakdown row ─────────────────────────────────────────────────────────
@@ -189,6 +209,15 @@ export default function PaymentModal({
   const [stripePromise, setStripePromise] = useState<ReturnType<typeof loadStripe> | null>(null);
   // Stale-data lock: detected after refetching the event on modal open
   const [freshBlockedReason, setFreshBlockedReason] = useState<"policy" | "full" | "ended" | null>(null);
+  // Promo code: the text being typed, the code that validated, and any "not valid" feedback.
+  const [promoInput, setPromoInput] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState<string | null>(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoPending, setPromoPending] = useState(false);
+  // Set when the applied code covers the whole price (100% off): there is nothing to charge, so the
+  // user joins through the free-join endpoint instead of Stripe.
+  const [freeViaPromo, setFreeViaPromo] = useState(false);
+  const [freeJoining, setFreeJoining] = useState(false);
 
   // Prop-based blocking (stale page data) — used for the instant early-return before any fetch
   const joinBlockedByPolicy = status === "HAS_STARTED" && allowJoinAfterStart === false;
@@ -258,6 +287,97 @@ export default function PaymentModal({
 
     void init();
   }, [postId, token, isLockedByProps]);
+
+  async function fetchFees(code: string | null): Promise<PostFees> {
+    const query = code ? `?postId=${postId}&promoCode=${encodeURIComponent(code)}` : `?postId=${postId}`;
+    const res = await fetch(`/api/post-fees${query}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const errData = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(errData.error ?? "That promo code isn't valid for this event.");
+    }
+    return (await res.json()) as PostFees;
+  }
+
+  // Rebuild the PaymentIntent at the given price so the amount charged matches what's shown. A new
+  // client secret remounts the Stripe form (keyed on it below).
+  async function rebuildSheet(code: string | null) {
+    const query = code ? `?postId=${postId}&promoCode=${encodeURIComponent(code)}` : `?postId=${postId}`;
+    const res = await fetch(`/api/payment-sheet/event${query}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const errData = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(errData.error ?? "That promo code isn't valid for this event.");
+    }
+    const sheet = (await res.json()) as StripePaymentSheet;
+    setClientSecret(sheet.clientSecret);
+  }
+
+  async function applyPromo() {
+    const code = promoInput.trim();
+    if (!code || promoPending) return;
+    setPromoPending(true);
+    setPromoError(null);
+    try {
+      // Price it first: this validates the code and tells us whether it makes the event free.
+      const nextFees = await fetchFees(code);
+      const isFree = (nextFees.totalPrice ?? 0) <= 0;
+      if (isFree) {
+        // 100% off — nothing to charge. Skip Stripe; the user will join via the free-join endpoint.
+        setFees(nextFees);
+        setFreeViaPromo(true);
+      } else {
+        await rebuildSheet(code);
+        setFees(nextFees);
+        setFreeViaPromo(false);
+      }
+      setAppliedPromo(code.toUpperCase());
+    } catch (err) {
+      setPromoError(err instanceof Error ? err.message : "Couldn't apply that code.");
+    } finally {
+      setPromoPending(false);
+    }
+  }
+
+  async function removePromo() {
+    if (promoPending) return;
+    setPromoPending(true);
+    setPromoError(null);
+    try {
+      const nextFees = await fetchFees(null);
+      await rebuildSheet(null);
+      setFees(nextFees);
+      setAppliedPromo(null);
+      setFreeViaPromo(false);
+      setPromoInput("");
+    } catch (err) {
+      setPromoError(err instanceof Error ? err.message : "Couldn't remove the code.");
+    } finally {
+      setPromoPending(false);
+    }
+  }
+
+  // Join a 100%-off event with no payment, through the same free-join endpoint used for free events.
+  async function joinFree() {
+    if (!appliedPromo || freeJoining) return;
+    setFreeJoining(true);
+    setPromoError(null);
+    try {
+      const res = await fetch("/api/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ type: "event", id: postId, promoCode: appliedPromo }),
+      });
+      const data = (await res.json()) as { success?: boolean; error?: string };
+      if (data.success) {
+        onSuccess();
+      } else {
+        setPromoError(data.error ?? "Couldn't join. Please try again.");
+      }
+    } catch {
+      setPromoError("Couldn't join. Please try again.");
+    } finally {
+      setFreeJoining(false);
+    }
+  }
 
   const symbol = currency?.symbol ?? "";
   const hostAbsorbsFees = ownerPaysStripeFee === true;
@@ -364,7 +484,17 @@ export default function PaymentModal({
           <div className="mb-5 rounded-2xl border border-white/10 bg-white/5 p-4">
             <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-stone-400">Order summary</p>
             <div className="space-y-2">
-              <FeeRow label="Ticket" amount={fees?.postPrice ?? payment} symbol={symbol} />
+              <FeeRow
+                label="Ticket"
+                amount={(appliedPromo && fees?.originalPrice != null ? fees.originalPrice : fees?.postPrice) ?? payment}
+                symbol={symbol}
+              />
+              {appliedPromo && fees?.discountedAmount != null && fees.discountedAmount > 0 && (
+                <div className="flex items-center justify-between text-emerald-300">
+                  <span className="text-sm">Promo · {appliedPromo}</span>
+                  <span className="text-sm">-{symbol}{fees.discountedAmount.toFixed(2)}</span>
+                </div>
+              )}
               {fees && (
                 <FeeRow
                   label="Service fee"
@@ -379,6 +509,16 @@ export default function PaymentModal({
                 <FeeRow label="Total" amount={totalAmount} symbol={symbol} bold />
               </div>
             </div>
+          </div>
+
+          {/* Group discount nudge — the platform has no bulk pricing, so point groups at the host */}
+          <div className="mb-4 flex items-start gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-300">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="mt-0.5 h-4 w-4 shrink-0 text-stone-400">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
+            </svg>
+            <span>
+              Bringing a group? Message the organizer before paying — they can offer a special discount for inviting more people.
+            </span>
           </div>
 
           {/* Status notices */}
@@ -418,7 +558,7 @@ export default function PaymentModal({
 
           {loadError && (
             <div className="rounded-xl bg-red-500/15 px-4 py-3 text-sm text-red-300 mb-4">
-              {loadError}
+              {friendlyPaymentError(loadError)}
             </div>
           )}
 
@@ -441,7 +581,69 @@ export default function PaymentModal({
           )}
 
           {!freshBlockedReason && !isLoading && !loadError && clientSecret && stripePromise && (
-            <Elements
+            <>
+              {/* Promo code — applying re-prices the order and rebuilds the payment intent */}
+              <div className="mb-5">
+                {appliedPromo ? (
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4 shrink-0 text-emerald-300">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
+                      </svg>
+                      <span className="truncate text-sm font-semibold text-emerald-300">{appliedPromo} applied</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void removePromo()}
+                      disabled={promoPending}
+                      className="shrink-0 text-xs font-medium text-stone-400 transition-colors hover:text-stone-200 disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      value={promoInput}
+                      onChange={(e) => { setPromoInput(e.target.value); if (promoError) setPromoError(null); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void applyPromo(); } }}
+                      placeholder="Promo code"
+                      autoCapitalize="characters"
+                      autoComplete="off"
+                      className="min-w-0 flex-1 rounded-xl border border-white/10 bg-stone-800 px-4 py-3 text-sm uppercase text-white placeholder:normal-case placeholder:text-stone-500 focus:border-white/30 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void applyPromo()}
+                      disabled={promoPending || !promoInput.trim()}
+                      className="shrink-0 rounded-xl border border-white/15 px-4 py-3 text-sm font-semibold text-stone-200 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {promoPending ? "…" : "Apply"}
+                    </button>
+                  </div>
+                )}
+                {promoError && <p className="mt-2 text-xs text-red-300">{promoError}</p>}
+              </div>
+
+              {freeViaPromo ? (
+                askToJoin ? (
+                  <div className="rounded-xl bg-white/5 px-4 py-3 text-sm text-stone-300">
+                    This code covers the full price, but this event needs organizer approval. Ask the organizer to admit you.
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void joinFree()}
+                    disabled={freeJoining}
+                    className="w-full rounded-2xl bg-white py-3.5 text-sm font-bold text-stone-900 transition-all active:scale-[0.98] hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {freeJoining ? "Joining…" : "Join for free"}
+                  </button>
+                )
+              ) : (
+              <Elements
+              key={clientSecret}
               stripe={stripePromise}
               options={{
                 clientSecret,
@@ -517,11 +719,18 @@ export default function PaymentModal({
                 onSuccess={onSuccess}
                 onClose={onClose}
               />
-            </Elements>
+              </Elements>
+              )}
+            </>
           )}
 
-          {/* Stripe branding */}
+          {/* Refund policy — refunds are host-initiated (backend allows only the organizer to refund) */}
           <p className="mt-4 text-center text-xs text-stone-500">
+            Refunds are handled by the event organizer. Contact them via the Togeda app if you need one.
+          </p>
+
+          {/* Stripe branding */}
+          <p className="mt-2 text-center text-xs text-stone-500">
             Secured by{" "}
             <span className="font-semibold text-stone-400">Stripe</span>
           </p>
