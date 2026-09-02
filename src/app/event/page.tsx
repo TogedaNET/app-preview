@@ -3,6 +3,7 @@ import { fetchEvent, fetchEventParticipants, type Event, type UserProfile } from
 import ImageGallery from "../components/ImageGallery";
 import ParticipantScroller from "../components/ParticipantScroller";
 import JoinCTA, { StickyJoinBar } from "../components/JoinCTA";
+import GroupTicketCTA from "../components/GroupTicketCTA";
 import HostRow from "../components/HostRow";
 import AppRedirect from "../components/AppRedirect";
 import LocationMap from "../components/LocationMap";
@@ -160,10 +161,13 @@ function EventDetailCard({ event }: { event: Event }) {
 export default async function EventPage({
   searchParams,
 }: {
-  searchParams: Promise<{ id?: string }>;
+  searchParams: Promise<{ id?: string; togeda?: string }>;
 }) {
-  const { id } = await searchParams;
+  const { id, togeda } = await searchParams;
   if (!id) notFound();
+
+  // `togeda=1` in the URL turns on the group-ticket discount purchase flow.
+  const groupDiscountEnabled = togeda === "1";
 
   let event: Event;
   try {
@@ -226,6 +230,8 @@ export default async function EventPage({
             </h1>
 
             <JoinCTA type="event" id={id} count={event.participantsCount} maximumPeople={event.maximumPeople} payment={event.payment} currency={event.currency} status={event.status} askToJoin={event.askToJoin} allowJoinAfterStart={event.allowJoinAfterStart} needsLocationalConfirmation={event.needsLocationalConfirmation} eventLat={event.location.latitude} eventLon={event.location.longitude} ownerEmail={event.owner.email} ownerName={`${event.owner.firstName} ${event.owner.lastName}`} ownerPaysStripeFee={event.ownerPaysStripeFee} />
+
+            {groupDiscountEnabled && !!event.payment && event.payment > 0 && <GroupTicketCTA />}
 
             <EventDetailCard event={event} />
             <ParticipantAvatars participants={participants} count={event.participantsCount} max={event.maximumPeople} />
