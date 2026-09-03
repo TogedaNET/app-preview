@@ -161,13 +161,20 @@ function EventDetailCard({ event }: { event: Event }) {
 export default async function EventPage({
   searchParams,
 }: {
-  searchParams: Promise<{ id?: string; togeda?: string }>;
+  searchParams: Promise<{ id?: string; togeda?: string; group?: string }>;
 }) {
-  const { id, togeda } = await searchParams;
+  const { id, togeda, group } = await searchParams;
   if (!id) notFound();
 
-  // `togeda=1` in the URL turns on the group-ticket discount purchase flow.
-  const groupDiscountEnabled = togeda === "1";
+  // `togeda=1` marks our web-purchase campaign links (e.g. promo codes): keep the
+  // visitor on the website instead of bouncing them to the app / store on arrival.
+  const isTogedaFlow = togeda === "1";
+  // `group=1` turns on the group-ticket discount purchase flow. It used to live
+  // behind `togeda=1`; it now has its own flag so `togeda=1` shows only the promo-code
+  // experience and the group CTA stays hidden until we explicitly enable it.
+  const groupDiscountEnabled = group === "1";
+  // Both are web-purchase flows, so don't auto-open the app or store on arrival.
+  const skipAppRedirect = isTogedaFlow || groupDiscountEnabled;
 
   let event: Event;
   try {
@@ -189,7 +196,7 @@ export default async function EventPage({
 
   return (
     <div className="relative min-h-dvh text-white">
-      <AppRedirect type="event" id={id} />
+      {!skipAppRedirect && <AppRedirect type="event" id={id} />}
       {/* Blurred background from event image */}
       {heroImage && (
         <div className="fixed inset-0 -z-10 overflow-hidden">
