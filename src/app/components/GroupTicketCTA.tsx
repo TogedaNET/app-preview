@@ -10,11 +10,16 @@ import { useAuth } from "./AuthContext";
 // URLs + price labels here.
 //
 // To set up (per paid event):
-//   1. Ask simsh for the discounted price of each pack (2 / 3 / 4 / 5 people).
-//   2. In Stripe → Payment Links, create one link per pack with that price and a
+//   1. Ask simsh for the discounted TOTAL of each pack (2 / 3 / 4 / 5 people) —
+//      this is the single amount the Stripe Payment Link charges.
+//   2. In Stripe → Payment Links, create one link per pack with that total and a
 //      product name like "Togeda group ticket · 4 people". The product name is how
 //      you read the ticket count back in the Payments list — keep it consistent.
-//   3. Paste the link URL and the human-readable price label below.
+//   3. Paste the link URL and the numeric `total` below. The per-person price shown
+//      on the button is derived (total ÷ people) — DON'T type it in.
+//
+// NOTE: `total` is what ONE buyer pays to cover the whole group; the "£… each" line
+// is display-only framing, not a real per-seat charge (Stripe bills the total once).
 //
 // The buyer's Togeda user id is appended as `client_reference_id` and their email
 // as `prefilled_email` at redirect time, so each payment is traceable to a user in
@@ -22,19 +27,31 @@ import { useAuth } from "./AuthContext";
 // ticket count = which product/link they bought).
 interface GroupTier {
   people: number;
-  priceLabel: string; // shown on the button, e.g. "£90" — leave "" until known
+  total: number; // discounted pack TOTAL baked into the Stripe link, e.g. 430 — leave 0 until known
   stripeLink: string; // full Stripe Payment Link URL — leave "" until created
 }
 
+const CURRENCY = "£";
+
 const GROUP_TIERS: GroupTier[] = [
-  { people: 2, priceLabel: "", stripeLink: "" },
-  { people: 3, priceLabel: "", stripeLink: "" },
-  { people: 4, priceLabel: "", stripeLink: "" },
-  { people: 5, priceLabel: "", stripeLink: "" },
+  { people: 2, total: 0, stripeLink: "" },
+  { people: 3, total: 0, stripeLink: "" },
+  { people: 4, total: 0, stripeLink: "" },
+  { people: 5, total: 0, stripeLink: "" },
 ];
 
 function isConfigured(tier: GroupTier): boolean {
-  return tier.stripeLink.startsWith("https://");
+  return tier.stripeLink.startsWith("https://") && tier.total > 0;
+}
+
+/** Format a number as a currency string with thousands separators, e.g. 1000 → "£1,000". */
+function money(amount: number): string {
+  return `${CURRENCY}${Math.round(amount).toLocaleString("en-GB")}`;
+}
+
+/** Derived per-person price — display-only framing, see note above. */
+function perPersonLabel(tier: GroupTier): string {
+  return money(tier.total / tier.people);
 }
 
 /** Append the buyer's identity so the payment is traceable in Stripe. */
@@ -139,9 +156,18 @@ export default function GroupTicketCTA() {
                   className="flex flex-col items-center justify-center gap-0.5 rounded-xl border border-white/10 bg-white/5 py-3.5 transition-all hover:border-emerald-500/40 hover:bg-emerald-500/10 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/5"
                 >
                   <span className="text-base font-bold text-white">{tier.people} people</span>
-                  <span className="text-xs font-medium text-emerald-300">
-                    {ready ? (tier.priceLabel || "See price") : "Coming soon"}
-                  </span>
+                  {ready ? (
+                    <>
+                      <span className="text-sm font-bold text-emerald-300">
+                        {perPersonLabel(tier)} each
+                      </span>
+                      <span className="text-[11px] font-medium text-stone-400">
+                        {money(tier.total)} total
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-xs font-medium text-emerald-300">Coming soon</span>
+                  )}
                 </button>
               );
             })}
