@@ -40,7 +40,7 @@ const CURRENCY = "€";
 
 // Per-ticket prices: 2→€225, 3→€215, 4→€210, 5→€200 each. `total` is people × per-ticket.
 const GROUP_TIERS: GroupTier[] = [
-  { people: 2, total: 450, stripeLink: "https://buy.stripe.com/cNi6oJfJO7Y7ea0c7z4Ja04" },
+  { people: 2, total: 450, stripeLink: "https://buy.stripe.com/4gMaEZ8hmemv2ric7z4Ja05" },
   { people: 3, total: 645, stripeLink: "https://buy.stripe.com/aFa14pbty92bgi8b3v4Ja01" },
   { people: 4, total: 840, stripeLink: "https://buy.stripe.com/7sY28t9lq92bfe4c7z4Ja02" },
   { people: 5, total: 1000, stripeLink: "https://buy.stripe.com/cNicN7416baj3vm2wZ4Ja03" },
