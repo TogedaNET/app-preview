@@ -18,26 +18,32 @@ import { useAuth } from "./AuthContext";
 //   3. Paste the link URL and the numeric `total` below. The per-person price shown
 //      on the button is derived (total ÷ people) — DON'T type it in.
 //
-// NOTE: `total` is what ONE buyer pays to cover the whole group; the "£… each" line
+// NOTE: `total` is what ONE buyer pays to cover the whole group; the "€… each" line
 // is display-only framing, not a real per-seat charge (Stripe bills the total once).
 //
-// The buyer's Togeda user id is appended as `client_reference_id` and their email
-// as `prefilled_email` at redirect time, so each payment is traceable to a user in
-// the Stripe Payments list (Export CSV → columns: amount, client_reference_id, email;
-// ticket count = which product/link they bought).
+// The buyer's Togeda user id AND the event (post) id are packed into a single
+// `client_reference_id` as `<userId>_<eventId>` at redirect time (both are UUIDs, so
+// underscore is a safe delimiter), plus their email as `prefilled_email`. That one
+// field is the only per-visitor channel a Payment Link forwards to the webhook, so it
+// carries everything the backend needs to auto-join the buyer as a normal paid entry
+// and to reconcile the payment in the Stripe Payments list (Export CSV → columns:
+// amount, client_reference_id, email; ticket count = which product/link they bought).
+// Because the event id rides in the ref, the SAME 4 links work for every group event
+// (as long as the pack prices are the same) — no per-event links needed.
 interface GroupTier {
   people: number;
   total: number; // discounted pack TOTAL baked into the Stripe link, e.g. 430 — leave 0 until known
   stripeLink: string; // full Stripe Payment Link URL — leave "" until created
 }
 
-const CURRENCY = "£";
+const CURRENCY = "€";
 
+// Per-ticket prices: 2→€225, 3→€215, 4→€210, 5→€200 each. `total` is people × per-ticket.
 const GROUP_TIERS: GroupTier[] = [
-  { people: 2, total: 0, stripeLink: "" },
-  { people: 3, total: 0, stripeLink: "" },
-  { people: 4, total: 0, stripeLink: "" },
-  { people: 5, total: 0, stripeLink: "" },
+  { people: 2, total: 450, stripeLink: "https://buy.stripe.com/bJe9AVfJO92b6Hy7Rj4Ja00" },
+  { people: 3, total: 645, stripeLink: "https://buy.stripe.com/aFa14pbty92bgi8b3v4Ja01" },
+  { people: 4, total: 840, stripeLink: "https://buy.stripe.com/7sY28t9lq92bfe4c7z4Ja02" },
+  { people: 5, total: 1000, stripeLink: "https://buy.stripe.com/cNicN7416baj3vm2wZ4Ja03" },
 ];
 
 function isConfigured(tier: GroupTier): boolean {
@@ -54,12 +60,24 @@ function perPersonLabel(tier: GroupTier): string {
   return money(tier.total / tier.people);
 }
 
-/** Append the buyer's identity so the payment is traceable in Stripe. */
-function buildCheckoutUrl(base: string, userId: string, email: string): string {
+/**
+ * Append the buyer's identity + the event id so the webhook can auto-join them.
+ * `client_reference_id` = `<userId>_<eventId>` — the backend splits on the underscore
+ * (both halves are UUIDs, which never contain one) and joins the buyer to that event.
+ */
+function buildCheckoutUrl(base: string, userId: string, eventId: string, email: string): string {
   const url = new URL(base);
-  url.searchParams.set("client_reference_id", userId);
+  url.searchParams.set("client_reference_id", `${userId}_${eventId}`);
   if (email) url.searchParams.set("prefilled_email", email);
   return url.toString();
+}
+
+function ChatIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 0 1 .778-.332 48.294 48.294 0 0 0 5.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v5.018Z" />
+    </svg>
+  );
 }
 
 function UsersIcon() {
@@ -75,7 +93,7 @@ function UsersIcon() {
  * flag (gated by the parent). Reveals 4 pack sizes; each redirects to its pre-made
  * Stripe Payment Link with the buyer's user id attached.
  */
-export default function GroupTicketCTA() {
+export default function GroupTicketCTA({ eventId }: { eventId: string }) {
   const { isAuthenticated, user } = useAuth();
   const [expanded, setExpanded] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -84,9 +102,11 @@ export default function GroupTicketCTA() {
   const redirecting = useRef(false);
 
   function goToCheckout(tier: GroupTier) {
-    if (redirecting.current || !user) return;
+    if (redirecting.current || !user || !eventId) return;
     redirecting.current = true;
-    window.location.href = buildCheckoutUrl(tier.stripeLink, user.sub, user.email);
+    // user.username is the backend user id (the "username" claim), NOT user.sub — the webhook
+    // resolves the buyer with userRepository.findById on this exact value.
+    window.location.href = buildCheckoutUrl(tier.stripeLink, user.username, eventId, user.email);
   }
 
   function handleSelect(tier: GroupTier) {
@@ -171,6 +191,18 @@ export default function GroupTicketCTA() {
                 </button>
               );
             })}
+          </div>
+
+          <div className="flex gap-2.5 rounded-xl border border-white/10 bg-white/5 p-3">
+            <span className="mt-0.5 shrink-0 text-emerald-300">
+              <ChatIcon />
+            </span>
+            <p className="text-xs leading-relaxed text-stone-300">
+              After you pay, we&apos;ll message you in the Togeda app and by email to get
+              everyone&apos;s names — yours and your friends&apos;. If any of your friends
+              are on Togeda, share their accounts too so we can add them to the event; then
+              we&apos;ll add everyone for you.
+            </p>
           </div>
 
           <p className="text-center text-[11px] text-stone-500">

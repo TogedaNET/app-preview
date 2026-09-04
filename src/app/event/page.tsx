@@ -238,7 +238,7 @@ export default async function EventPage({
 
             <JoinCTA type="event" id={id} count={event.participantsCount} maximumPeople={event.maximumPeople} payment={event.payment} currency={event.currency} status={event.status} askToJoin={event.askToJoin} allowJoinAfterStart={event.allowJoinAfterStart} needsLocationalConfirmation={event.needsLocationalConfirmation} eventLat={event.location.latitude} eventLon={event.location.longitude} ownerEmail={event.owner.email} ownerName={`${event.owner.firstName} ${event.owner.lastName}`} ownerPaysStripeFee={event.ownerPaysStripeFee} />
 
-            {groupDiscountEnabled && !!event.payment && event.payment > 0 && <GroupTicketCTA />}
+            {groupDiscountEnabled && !!event.payment && event.payment > 0 && id && <GroupTicketCTA eventId={id} />}
 
             <EventDetailCard event={event} />
             <ParticipantAvatars participants={participants} count={event.participantsCount} max={event.maximumPeople} />

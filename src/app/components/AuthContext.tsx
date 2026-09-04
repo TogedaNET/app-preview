@@ -5,6 +5,9 @@ import { createContext, useContext, useEffect, useState } from "react";
 export interface AuthUser {
   sub: string;
   email: string;
+  // The Cognito "username" claim — this is the id the backend keys users on
+  // (see PostController.USERNAME). Use this, not `sub`, when handing a user id to the API.
+  username: string;
 }
 
 interface AuthContextValue {
@@ -43,7 +46,7 @@ function decodeJwtPayload(token: string): AuthUser | null {
     if (payload.exp && payload.exp * 1000 < Date.now()) return null;
     const email = payload.email ?? payload.username;
     if (!payload.sub || !email) return null;
-    return { sub: payload.sub, email };
+    return { sub: payload.sub, email, username: payload.username ?? payload.sub };
   } catch {
     return null;
   }
