@@ -3,7 +3,6 @@ import { fetchEvent, fetchEventParticipants, type Event, type UserProfile } from
 import ImageGallery from "../components/ImageGallery";
 import ParticipantScroller from "../components/ParticipantScroller";
 import JoinCTA, { StickyJoinBar } from "../components/JoinCTA";
-import GroupTicketCTA from "../components/GroupTicketCTA";
 import HostRow from "../components/HostRow";
 import AppRedirect from "../components/AppRedirect";
 import LocationMap from "../components/LocationMap";
@@ -161,20 +160,10 @@ function EventDetailCard({ event }: { event: Event }) {
 export default async function EventPage({
   searchParams,
 }: {
-  searchParams: Promise<{ id?: string; togeda?: string; group?: string }>;
+  searchParams: Promise<{ id?: string }>;
 }) {
-  const { id, togeda, group } = await searchParams;
+  const { id } = await searchParams;
   if (!id) notFound();
-
-  // `togeda=1` marks our web-purchase campaign links (e.g. promo codes): keep the
-  // visitor on the website instead of bouncing them to the app / store on arrival.
-  const isTogedaFlow = togeda === "1";
-  // `group=1` turns on the group-ticket discount purchase flow. It used to live
-  // behind `togeda=1`; it now has its own flag so `togeda=1` shows only the promo-code
-  // experience and the group CTA stays hidden until we explicitly enable it.
-  const groupDiscountEnabled = group === "1";
-  // Both are web-purchase flows, so don't auto-open the app or store on arrival.
-  const skipAppRedirect = isTogedaFlow || groupDiscountEnabled;
 
   let event: Event;
   try {
@@ -196,7 +185,7 @@ export default async function EventPage({
 
   return (
     <div className="relative min-h-dvh text-white">
-      {!skipAppRedirect && <AppRedirect type="event" id={id} />}
+      <AppRedirect type="event" id={id} />
       {/* Blurred background from event image */}
       {heroImage && (
         <div className="fixed inset-0 -z-10 overflow-hidden">
@@ -237,8 +226,6 @@ export default async function EventPage({
             </h1>
 
             <JoinCTA type="event" id={id} count={event.participantsCount} maximumPeople={event.maximumPeople} payment={event.payment} currency={event.currency} status={event.status} askToJoin={event.askToJoin} allowJoinAfterStart={event.allowJoinAfterStart} needsLocationalConfirmation={event.needsLocationalConfirmation} eventLat={event.location.latitude} eventLon={event.location.longitude} ownerEmail={event.owner.email} ownerName={`${event.owner.firstName} ${event.owner.lastName}`} ownerPaysStripeFee={event.ownerPaysStripeFee} />
-
-            {groupDiscountEnabled && !!event.payment && event.payment > 0 && id && <GroupTicketCTA eventId={id} />}
 
             <EventDetailCard event={event} />
             <ParticipantAvatars participants={participants} count={event.participantsCount} max={event.maximumPeople} />

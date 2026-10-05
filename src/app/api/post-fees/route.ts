@@ -9,16 +9,12 @@ export async function GET(req: NextRequest) {
   if (auth.error) return auth.error;
   const authorization = auth.authorization;
 
-  const searchParams = new URL(req.url).searchParams;
-  const params = parseParams(searchParams, postIdParamSchema);
+  const params = parseParams(new URL(req.url).searchParams, postIdParamSchema);
   if (params.error) return params.error;
   const { postId } = params.data;
-  const promoCode = searchParams.get("promoCode");
 
   try {
-    const backendUrl = new URL(`${env.BACKEND_URL}/posts/${postId}/fees`);
-    if (promoCode) backendUrl.searchParams.set("promoCode", promoCode);
-    const res = await fetch(backendUrl, {
+    const res = await fetch(`${env.BACKEND_URL}/posts/${postId}/fees`, {
       headers: { Authorization: authorization },
     });
 
